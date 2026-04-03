@@ -1,5 +1,6 @@
 package fr.jeremy.lammprimante.ui;
 
+import fr.jeremy.lammprimante.config.PreferencesManager;
 import fr.jeremy.lammprimante.config.ThemeManager;
 import fr.jeremy.lammprimante.model.PrintSettings;
 import fr.jeremy.lammprimante.service.FileImportService;
@@ -45,6 +46,18 @@ public class MainWindow extends JFrame {
         loadIcon();
 
         printerCombo = createPrinterCombo();
+
+        // Restaurer les préférences sauvegardées
+        batchSizeSpinner.setValue(PreferencesManager.getBatchSize());
+        rectoVersoCombo.setSelectedIndex(PreferencesManager.getDuplex());
+        orientationCombo.setSelectedIndex(PreferencesManager.getOrientation());
+        colorCombo.setSelectedIndex(PreferencesManager.getColor());
+
+        // Sauvegarder à chaque modification
+        batchSizeSpinner.addChangeListener(e -> PreferencesManager.setBatchSize((int) batchSizeSpinner.getValue()));
+        rectoVersoCombo.addActionListener(e -> PreferencesManager.setDuplex(rectoVersoCombo.getSelectedIndex()));
+        orientationCombo.addActionListener(e -> PreferencesManager.setOrientation(orientationCombo.getSelectedIndex()));
+        colorCombo.addActionListener(e -> PreferencesManager.setColor(colorCombo.getSelectedIndex()));
 
         fileList.setCellRenderer(new DefaultListCellRenderer() {
             @Override

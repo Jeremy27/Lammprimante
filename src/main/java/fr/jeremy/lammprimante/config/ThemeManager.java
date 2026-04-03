@@ -8,13 +8,8 @@ import java.awt.*;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.prefs.Preferences;
 
 public class ThemeManager {
-
-    private static final Preferences PREFS = Preferences.userNodeForPackage(ThemeManager.class);
-    private static final String PREF_THEME = "theme";
-    private static final String DEFAULT_THEME = "Sombre";
 
     private static final Map<String, MaterialTheme> THEMES = new LinkedHashMap<>();
     static {
@@ -28,12 +23,12 @@ public class ThemeManager {
     }
 
     public static String getSavedTheme() {
-        return PREFS.get(PREF_THEME, DEFAULT_THEME);
+        return PreferencesManager.getTheme();
     }
 
     public static void applySaved() {
         String savedTheme = getSavedTheme();
-        MaterialTheme theme = THEMES.getOrDefault(savedTheme, THEMES.get(DEFAULT_THEME));
+        MaterialTheme theme = THEMES.getOrDefault(savedTheme, THEMES.get("Sombre"));
         try {
             UIManager.setLookAndFeel(new MaterialLookAndFeel(theme));
         } catch (Exception ignored) {}
@@ -45,7 +40,7 @@ public class ThemeManager {
         try {
             UIManager.setLookAndFeel(new MaterialLookAndFeel(theme));
             SwingUtilities.updateComponentTreeUI(root);
-            PREFS.put(PREF_THEME, themeName);
+            PreferencesManager.setTheme(themeName);
         } catch (UnsupportedLookAndFeelException ex) {
             JOptionPane.showMessageDialog(root,
                     "Impossible d'appliquer le thème : " + ex.getMessage(),
