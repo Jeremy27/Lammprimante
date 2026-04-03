@@ -1,6 +1,6 @@
-package fr.jeremy.lammprimante.service;
+package fr.courel.lammprimante.service;
 
-import fr.jeremy.lammprimante.model.PrintSettings;
+import fr.courel.lammprimante.model.PrintSettings;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;

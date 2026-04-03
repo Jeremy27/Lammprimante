@@ -9,3 +9,4 @@ target/
 .classpath
 .vscode/
 dependency-reduced-pom.xml
+*.zip

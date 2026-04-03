@@ -1,8 +1,8 @@
-package fr.jeremy.lammprimante;
+package fr.courel.lammprimante;
 
-import fr.jeremy.lammprimante.config.ThemeManager;
-import fr.jeremy.lammprimante.service.LogService;
-import fr.jeremy.lammprimante.ui.MainWindow;
+import fr.courel.lammprimante.config.ThemeManager;
+import fr.courel.lammprimante.service.LogService;
+import fr.courel.lammprimante.view.MainWindow;
 
 import javax.swing.*;
 

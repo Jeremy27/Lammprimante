@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>fr.jeremy</groupId>
+    <groupId>fr.courel</groupId>
     <artifactId>lammprimante</artifactId>
     <version>1.0</version>
     <packaging>jar</packaging>
@@ -43,7 +43,7 @@
                         <configuration>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>fr.jeremy.lammprimante.App</mainClass>
+                                    <mainClass>fr.courel.lammprimante.App</mainClass>
                                 </transformer>
                             </transformers>
                             <filters>
@@ -56,6 +56,42 @@
                                     </excludes>
                                 </filter>
                             </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>com.akathist.maven.plugins.launch4j</groupId>
+                <artifactId>launch4j-maven-plugin</artifactId>
+                <version>2.5.2</version>
+                <executions>
+                    <execution>
+                        <id>wrap-exe</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>launch4j</goal>
+                        </goals>
+                        <configuration>
+                            <headerType>gui</headerType>
+                            <outfile>${project.build.directory}/Lammprimante.exe</outfile>
+                            <jar>${project.build.directory}/${project.build.finalName}.jar</jar>
+                            <errTitle>Lammprimante</errTitle>
+                            <icon>${project.basedir}/src/main/resources/logo.ico</icon>
+                            <jre>
+                                <path>./jre</path>
+                                <minVersion>17</minVersion>
+                            </jre>
+                            <versionInfo>
+                                <fileVersion>1.0.0.0</fileVersion>
+                                <txtFileVersion>1.0</txtFileVersion>
+                                <fileDescription>Lammprimante</fileDescription>
+                                <copyright>Jeremy</copyright>
+                                <productVersion>1.0.0.0</productVersion>
+                                <txtProductVersion>1.0</txtProductVersion>
+                                <productName>Lammprimante</productName>
+                                <internalName>lammprimante</internalName>
+                                <originalFilename>Lammprimante.exe</originalFilename>
+                            </versionInfo>
                         </configuration>
                     </execution>
                 </executions>

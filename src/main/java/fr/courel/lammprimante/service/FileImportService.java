@@ -1,4 +1,4 @@
-package fr.jeremy.lammprimante.service;
+package fr.courel.lammprimante.service;
 
 import java.io.*;
 import java.nio.file.Files;

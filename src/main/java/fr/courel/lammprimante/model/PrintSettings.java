@@ -1,4 +1,4 @@
-package fr.jeremy.lammprimante.model;
+package fr.courel.lammprimante.model;
 
 import javax.print.attribute.HashPrintRequestAttributeSet;
 import javax.print.attribute.standard.*;

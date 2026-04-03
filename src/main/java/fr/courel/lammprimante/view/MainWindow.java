@@ -1,11 +1,11 @@
-package fr.jeremy.lammprimante.ui;
+package fr.courel.lammprimante.view;
 
-import fr.jeremy.lammprimante.config.PreferencesManager;
-import fr.jeremy.lammprimante.config.ThemeManager;
-import fr.jeremy.lammprimante.model.PrintSettings;
-import fr.jeremy.lammprimante.service.FileImportService;
-import fr.jeremy.lammprimante.service.LogService;
-import fr.jeremy.lammprimante.service.PrintService;
+import fr.courel.lammprimante.config.PreferencesManager;
+import fr.courel.lammprimante.config.ThemeManager;
+import fr.courel.lammprimante.model.PrintSettings;
+import fr.courel.lammprimante.service.FileImportService;
+import fr.courel.lammprimante.service.LogService;
+import fr.courel.lammprimante.service.PrintService;
 
 import javax.imageio.ImageIO;
 import javax.print.PrintServiceLookup;

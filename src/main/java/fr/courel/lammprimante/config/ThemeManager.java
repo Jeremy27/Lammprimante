@@ -1,4 +1,4 @@
-package fr.jeremy.lammprimante.config;
+package fr.courel.lammprimante.config;
 
 import mdlaf.MaterialLookAndFeel;
 import mdlaf.themes.*;
