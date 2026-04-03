@@ -4,6 +4,7 @@ import fr.jeremy.lammprimante.config.PreferencesManager;
 import fr.jeremy.lammprimante.config.ThemeManager;
 import fr.jeremy.lammprimante.model.PrintSettings;
 import fr.jeremy.lammprimante.service.FileImportService;
+import fr.jeremy.lammprimante.service.LogService;
 import fr.jeremy.lammprimante.service.PrintService;
 
 import javax.imageio.ImageIO;
@@ -241,16 +242,19 @@ public class MainWindow extends JFrame {
     }
 
     private void importFiles(List<File> files) {
+        LogService.info("Import de " + files.size() + " fichier(s)");
         FileImportService.ImportResult result = fileImportService.importFiles(files);
         for (File f : result.accepted()) {
             if (!fileListModel.contains(f)) {
                 fileListModel.addElement(f);
+                LogService.info("Fichier ajouté : " + f.getName());
             }
         }
         if (!result.rejected().isEmpty()) {
             logArea.append("Fichiers ignorés (format non supporté) :\n");
             for (String name : result.rejected()) {
                 logArea.append("  - " + name + "\n");
+                LogService.info("Fichier ignoré : " + name);
             }
             logArea.setCaretPosition(logArea.getDocument().getLength());
         }
@@ -294,6 +298,8 @@ public class MainWindow extends JFrame {
         progressBar.setValue(0);
         progressBar.setMaximum(files.size());
 
+        LogService.info("Lancement impression : " + files.size() + " fichier(s), imprimante=" + printer.getName());
+
         SwingWorker<Void, String> worker = new SwingWorker<>() {
             @Override
             protected Void doInBackground() {
@@ -302,9 +308,11 @@ public class MainWindow extends JFrame {
                     File file = files.get(i);
                     try {
                         service.print(file, printer, settings, progress -> {
-                            publish(String.format("[%s] Lot %d/%d (pages %d à %d) envoyé",
+                            String msg = String.format("[%s] Lot %d/%d (pages %d à %d) envoyé",
                                     progress.fileName(), progress.batchNumber(), progress.totalBatches(),
-                                    progress.fromPage(), progress.toPage()));
+                                    progress.fromPage(), progress.toPage());
+                            publish(msg);
+                            LogService.info(msg);
                         });
                         int current = i + 1;
                         SwingUtilities.invokeLater(() -> {
@@ -314,7 +322,7 @@ public class MainWindow extends JFrame {
                     } catch (Exception ex) {
                         String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
                         publish("ERREUR [" + file.getName() + "] : " + msg);
-                        ex.printStackTrace();
+                        LogService.error("Impression échouée pour " + file.getName(), ex);
                     }
                 }
                 return null;
@@ -332,8 +340,12 @@ public class MainWindow extends JFrame {
             protected void done() {
                 setControlsEnabled(true);
                 logArea.append("--- Terminé ---\n");
+                if (logArea.getText().contains("ERREUR")) {
+                    logArea.append("Détails des erreurs dans : " + LogService.getLogFile() + "\n");
+                }
                 logArea.setCaretPosition(logArea.getDocument().getLength());
                 progressBar.setString("Terminé");
+                LogService.info("Impression terminée");
             }
         };
         worker.execute();
