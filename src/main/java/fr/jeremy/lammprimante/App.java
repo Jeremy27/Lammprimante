@@ -1,4 +1,4 @@
-package fr.jeremy.pdfprinter;
+package fr.jeremy.lammprimante;
 
 import mdlaf.MaterialLookAndFeel;
 import mdlaf.themes.*;

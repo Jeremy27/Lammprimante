@@ -25,7 +25,7 @@ mvn package
 ## Lancement
 
 ```bash
-java -jar target/pdf-batch-printer-1.0.jar
+java -jar target/lammprimante-1.0.jar
 ```
 
 ## Distribution Windows

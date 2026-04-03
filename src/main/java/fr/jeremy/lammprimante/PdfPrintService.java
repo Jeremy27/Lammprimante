@@ -1,4 +1,4 @@
-package fr.jeremy.pdfprinter;
+package fr.jeremy.lammprimante;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
