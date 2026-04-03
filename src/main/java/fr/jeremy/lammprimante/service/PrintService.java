@@ -1,5 +1,6 @@
-package fr.jeremy.lammprimante;
+package fr.jeremy.lammprimante.service;
 
+import fr.jeremy.lammprimante.model.PrintSettings;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -9,44 +10,31 @@ import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.printing.PDFPageable;
 
 import javax.imageio.ImageIO;
-import javax.print.PrintService;
 import javax.print.attribute.HashPrintRequestAttributeSet;
 import javax.print.attribute.standard.PageRanges;
 import java.awt.image.BufferedImage;
 import java.awt.print.PrinterJob;
 import java.io.File;
-import java.util.Set;
 import java.util.function.Consumer;
 
-public class PdfPrintService {
-
-    private static final Set<String> IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "bmp", "gif", "tiff", "tif");
+public class PrintService {
 
     public record PrintProgress(String fileName, int batchNumber, int totalBatches, int fromPage, int toPage) {}
 
-    public static boolean isSupported(File file) {
-        String ext = getExtension(file);
-        return ext.equals("pdf") || IMAGE_EXTENSIONS.contains(ext);
-    }
-
-    public static String getExtension(File file) {
-        String name = file.getName().toLowerCase();
-        int dot = name.lastIndexOf('.');
-        return dot >= 0 ? name.substring(dot + 1) : "";
-    }
-
-    public void print(File file, int batchSize, PrintService printer, HashPrintRequestAttributeSet baseAttrs, Consumer<PrintProgress> onProgress) throws Exception {
-        String ext = getExtension(file);
-        if (IMAGE_EXTENSIONS.contains(ext)) {
-            printImage(file, printer, baseAttrs, onProgress);
+    public void print(File file, javax.print.PrintService printer, PrintSettings settings,
+                      Consumer<PrintProgress> onProgress) throws Exception {
+        if (FileImportService.isImage(file)) {
+            printImage(file, printer, settings, onProgress);
         } else {
-            printPdf(file, batchSize, printer, baseAttrs, onProgress);
+            printPdf(file, printer, settings, onProgress);
         }
     }
 
-    private void printPdf(File pdfFile, int batchSize, PrintService printer, HashPrintRequestAttributeSet baseAttrs, Consumer<PrintProgress> onProgress) throws Exception {
+    private void printPdf(File pdfFile, javax.print.PrintService printer, PrintSettings settings,
+                          Consumer<PrintProgress> onProgress) throws Exception {
         try (PDDocument document = Loader.loadPDF(pdfFile)) {
             int totalPages = document.getNumberOfPages();
+            int batchSize = settings.batchSize();
             int totalBatches = (int) Math.ceil((double) totalPages / batchSize);
 
             for (int batch = 0; batch < totalBatches; batch++) {
@@ -61,14 +49,15 @@ public class PdfPrintService {
                 job.setPageable(new PDFPageable(document));
                 job.setJobName(pdfFile.getName() + " - lot " + (batch + 1) + "/" + totalBatches);
 
-                HashPrintRequestAttributeSet attrs = new HashPrintRequestAttributeSet(baseAttrs);
+                HashPrintRequestAttributeSet attrs = new HashPrintRequestAttributeSet(settings.toAttributes());
                 attrs.add(new PageRanges(fromPage + 1, toPage));
                 job.print(attrs);
             }
         }
     }
 
-    private void printImage(File imageFile, PrintService printer, HashPrintRequestAttributeSet baseAttrs, Consumer<PrintProgress> onProgress) throws Exception {
+    private void printImage(File imageFile, javax.print.PrintService printer, PrintSettings settings,
+                            Consumer<PrintProgress> onProgress) throws Exception {
         BufferedImage img = ImageIO.read(imageFile);
         if (img == null) {
             throw new Exception("Impossible de lire l'image");
@@ -105,7 +94,7 @@ public class PdfPrintService {
             job.setPrintService(printer);
             job.setPageable(new PDFPageable(doc));
             job.setJobName(imageFile.getName());
-            job.print(baseAttrs);
+            job.print(settings.toAttributes());
         }
     }
 }
