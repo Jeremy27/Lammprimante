@@ -65,7 +65,7 @@ public class MainWindow extends JFrame {
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
                 super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
                 if (value instanceof File f) {
-                    setText(f.getName());
+                    setText(fileImportService.getDisplayName(f));
                     setToolTipText(f.getAbsolutePath());
                 }
                 return this;
@@ -243,21 +243,34 @@ public class MainWindow extends JFrame {
 
     private void importFiles(List<File> files) {
         LogService.info("Import de " + files.size() + " fichier(s)");
+        logArea.append("Import de " + files.size() + " fichier(s)...\n");
         FileImportService.ImportResult result = fileImportService.importFiles(files);
+
         for (File f : result.accepted()) {
             if (!fileListModel.contains(f)) {
                 fileListModel.addElement(f);
-                LogService.info("Fichier ajouté : " + f.getName());
+                String displayName = fileImportService.getDisplayName(f);
+                logArea.append("  + " + displayName + "\n");
+                LogService.info("Fichier ajouté : " + displayName);
             }
         }
+
         if (!result.rejected().isEmpty()) {
             logArea.append("Fichiers ignorés (format non supporté) :\n");
             for (String name : result.rejected()) {
                 logArea.append("  - " + name + "\n");
                 LogService.info("Fichier ignoré : " + name);
             }
-            logArea.setCaretPosition(logArea.getDocument().getLength());
         }
+
+        if (!result.errors().isEmpty()) {
+            for (String error : result.errors()) {
+                logArea.append("ERREUR : " + error + "\n");
+                LogService.error(error);
+            }
+        }
+
+        logArea.setCaretPosition(logArea.getDocument().getLength());
     }
 
     private void addFiles() {
