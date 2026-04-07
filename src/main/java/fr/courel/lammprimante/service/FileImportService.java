@@ -4,15 +4,20 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public class FileImportService {
 
     private static final Set<String> IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "bmp", "gif", "tiff", "tif");
+    private static final int BUFFER_SIZE = 8192;
 
     /** Maps extracted temp files to their display name (relative path in ZIP or original name). */
     private final Map<File, String> displayNames = new HashMap<>();
+
+    /** Temp directories to clean up on exit. */
+    private final List<Path> tempDirs = new ArrayList<>();
 
     public record ImportResult(List<File> accepted, List<String> rejected, List<String> errors) {}
 
@@ -39,16 +44,22 @@ public class FileImportService {
         return dot >= 0 ? name.substring(dot + 1) : "";
     }
 
-    public ImportResult importFiles(List<File> files) {
+    /**
+     * Import files, reporting each accepted file via onFileAccepted for live progress.
+     */
+    public ImportResult importFiles(List<File> files, Consumer<String> onFileAccepted) {
         List<File> accepted = new ArrayList<>();
         List<String> rejected = new ArrayList<>();
         List<String> errors = new ArrayList<>();
 
         for (File f : files) {
-            if (isZip(f)) {
-                extractFromZip(f, accepted, rejected, errors);
+            if (f.isDirectory()) {
+                importDirectory(f, f.getName(), accepted, rejected, errors, onFileAccepted);
+            } else if (isZip(f)) {
+                extractFromZip(f, accepted, rejected, errors, onFileAccepted);
             } else if (isSupported(f)) {
                 accepted.add(f);
+                onFileAccepted.accept(getDisplayName(f));
             } else {
                 rejected.add(f.getName());
             }
@@ -57,13 +68,65 @@ public class FileImportService {
         return new ImportResult(accepted, rejected, errors);
     }
 
-    private void extractFromZip(File zipFile, List<File> accepted, List<String> rejected, List<String> errors) {
+    /** Clean up all temp directories created during extraction. */
+    public void cleanup() {
+        for (Path dir : tempDirs) {
+            deleteRecursive(dir.toFile());
+        }
+        tempDirs.clear();
+    }
+
+    private void deleteRecursive(File file) {
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        file.delete();
+    }
+
+    private void importDirectory(File dir, String basePath, List<File> accepted, List<String> rejected,
+                                List<String> errors, Consumer<String> onFileAccepted) {
+        int countBefore = accepted.size();
+        File[] children = dir.listFiles();
+        if (children == null) {
+            errors.add("Impossible de lire le dossier " + dir.getName());
+            return;
+        }
+
+        Arrays.sort(children);
+        for (File child : children) {
+            if (child.isDirectory()) {
+                importDirectory(child, basePath + "/" + child.getName(), accepted, rejected, errors, onFileAccepted);
+            } else if (isZip(child)) {
+                extractFromZip(child, accepted, rejected, errors, onFileAccepted);
+            } else if (isSupported(child)) {
+                accepted.add(child);
+                String displayName = basePath + "/" + child.getName();
+                displayNames.put(child, displayName);
+                onFileAccepted.accept(displayName);
+            } else {
+                rejected.add(basePath + "/" + child.getName());
+            }
+        }
+
+        if (accepted.size() == countBefore) {
+            errors.add("Aucun fichier supporté trouvé dans le dossier " + basePath);
+        }
+    }
+
+    private void extractFromZip(File zipFile, List<File> accepted, List<String> rejected,
+                                List<String> errors, Consumer<String> onFileAccepted) {
         int countBefore = accepted.size();
         try {
             Path tempDir = Files.createTempDirectory("lammprimante-");
-            tempDir.toFile().deleteOnExit();
+            tempDirs.add(tempDir);
 
-            try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFile))) {
+            try (var fis = new BufferedInputStream(new FileInputStream(zipFile), BUFFER_SIZE);
+                 var zis = new ZipInputStream(fis)) {
                 ZipEntry entry;
                 while ((entry = zis.getNextEntry()) != null) {
                     if (entry.isDirectory()) continue;
@@ -74,16 +137,16 @@ public class FileImportService {
                     Path relativePath = Path.of(entryName);
                     Path extractPath = tempDir.resolve(relativePath);
                     Files.createDirectories(extractPath.getParent());
-                    extractPath.toFile().deleteOnExit();
 
-                    try (FileOutputStream fos = new FileOutputStream(extractPath.toFile())) {
-                        zis.transferTo(fos);
+                    try (var bos = new BufferedOutputStream(new FileOutputStream(extractPath.toFile()), BUFFER_SIZE)) {
+                        zis.transferTo(bos);
                     }
 
                     if (isSupported(extractPath.toFile())) {
                         accepted.add(extractPath.toFile());
-                        // Store display name as "archive.zip/path/to/file.pdf"
-                        displayNames.put(extractPath.toFile(), zipFile.getName() + "/" + entryName);
+                        String displayName = zipFile.getName() + "/" + entryName;
+                        displayNames.put(extractPath.toFile(), displayName);
+                        onFileAccepted.accept(displayName);
                     } else {
                         rejected.add(entryName + " (dans " + zipFile.getName() + ")");
                         extractPath.toFile().delete();

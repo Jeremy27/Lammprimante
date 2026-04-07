@@ -46,6 +46,13 @@ public class MainWindow extends JFrame {
         setLocationRelativeTo(null);
         loadIcon();
 
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                fileImportService.cleanup();
+            }
+        });
+
         printerCombo = createPrinterCombo();
 
         // Restaurer les préférences sauvegardées
@@ -126,7 +133,7 @@ public class MainWindow extends JFrame {
 
     private JPanel createFilePanel() {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
-        panel.setBorder(BorderFactory.createTitledBorder("Fichiers (glisser-déposer PDF, images ou ZIP ici)"));
+        panel.setBorder(BorderFactory.createTitledBorder("Fichiers (glisser-déposer PDF, images, ZIP ou dossiers ici)"));
         panel.add(new JScrollPane(fileList), BorderLayout.CENTER);
 
         new DropTarget(fileList, new DropTargetAdapter() {
@@ -244,38 +251,66 @@ public class MainWindow extends JFrame {
     private void importFiles(List<File> files) {
         LogService.info("Import de " + files.size() + " fichier(s)");
         logArea.append("Import de " + files.size() + " fichier(s)...\n");
-        FileImportService.ImportResult result = fileImportService.importFiles(files);
+        setControlsEnabled(false);
 
-        for (File f : result.accepted()) {
-            if (!fileListModel.contains(f)) {
-                fileListModel.addElement(f);
-                String displayName = fileImportService.getDisplayName(f);
-                logArea.append("  + " + displayName + "\n");
-                LogService.info("Fichier ajouté : " + displayName);
+        SwingWorker<FileImportService.ImportResult, String> worker = new SwingWorker<>() {
+            @Override
+            protected FileImportService.ImportResult doInBackground() {
+                return fileImportService.importFiles(files, displayName -> publish("  + " + displayName));
             }
-        }
 
-        if (!result.rejected().isEmpty()) {
-            logArea.append("Fichiers ignorés (format non supporté) :\n");
-            for (String name : result.rejected()) {
-                logArea.append("  - " + name + "\n");
-                LogService.info("Fichier ignoré : " + name);
+            @Override
+            protected void process(java.util.List<String> chunks) {
+                for (String msg : chunks) {
+                    logArea.append(msg + "\n");
+                    LogService.info("Fichier ajouté :" + msg.substring(3));
+                }
+                logArea.setCaretPosition(logArea.getDocument().getLength());
             }
-        }
 
-        if (!result.errors().isEmpty()) {
-            for (String error : result.errors()) {
-                logArea.append("ERREUR : " + error + "\n");
-                LogService.error(error);
+            @Override
+            protected void done() {
+                try {
+                    FileImportService.ImportResult result = get();
+
+                    for (File f : result.accepted()) {
+                        if (!fileListModel.contains(f)) {
+                            fileListModel.addElement(f);
+                        }
+                    }
+
+                    if (!result.rejected().isEmpty()) {
+                        logArea.append("Fichiers ignorés (format non supporté) :\n");
+                        for (String name : result.rejected()) {
+                            logArea.append("  - " + name + "\n");
+                            LogService.info("Fichier ignoré : " + name);
+                        }
+                    }
+
+                    if (!result.errors().isEmpty()) {
+                        for (String error : result.errors()) {
+                            logArea.append("ERREUR : " + error + "\n");
+                            LogService.error(error);
+                        }
+                    }
+
+                    logArea.append("Import terminé : " + result.accepted().size() + " fichier(s) ajouté(s)\n");
+                    LogService.info("Import terminé : " + result.accepted().size() + " fichier(s)");
+                } catch (Exception ex) {
+                    logArea.append("ERREUR : " + ex.getMessage() + "\n");
+                    LogService.error("Erreur lors de l'import", ex);
+                }
+                logArea.setCaretPosition(logArea.getDocument().getLength());
+                setControlsEnabled(true);
             }
-        }
-
-        logArea.setCaretPosition(logArea.getDocument().getLength());
+        };
+        worker.execute();
     }
 
     private void addFiles() {
         JFileChooser chooser = new JFileChooser();
         chooser.setMultiSelectionEnabled(true);
+        chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
         chooser.setFileFilter(new FileNameExtensionFilter("PDF, images et ZIP", "pdf", "zip", "jpg", "jpeg", "png", "bmp", "gif", "tiff", "tif"));
         if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             importFiles(List.of(chooser.getSelectedFiles()));
