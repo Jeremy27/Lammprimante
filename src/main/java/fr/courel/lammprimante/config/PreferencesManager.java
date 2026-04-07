@@ -56,4 +56,17 @@ public class PreferencesManager {
     public static void setColor(int index) {
         PREFS.putInt(PREF_COLOR, index);
     }
+
+    // Fenêtre
+    public static int getWindowX() { return PREFS.getInt("windowX", -1); }
+    public static int getWindowY() { return PREFS.getInt("windowY", -1); }
+    public static int getWindowWidth() { return PREFS.getInt("windowWidth", 750); }
+    public static int getWindowHeight() { return PREFS.getInt("windowHeight", 600); }
+
+    public static void setWindowBounds(int x, int y, int width, int height) {
+        PREFS.putInt("windowX", x);
+        PREFS.putInt("windowY", y);
+        PREFS.putInt("windowWidth", width);
+        PREFS.putInt("windowHeight", height);
+    }
 }

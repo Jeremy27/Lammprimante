@@ -1,6 +1,7 @@
 package fr.courel.lammprimante.service;
 
 import java.io.*;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -126,7 +127,7 @@ public class FileImportService {
             tempDirs.add(tempDir);
 
             try (var fis = new BufferedInputStream(new FileInputStream(zipFile), BUFFER_SIZE);
-                 var zis = new ZipInputStream(fis)) {
+                 var zis = new ZipInputStream(fis, Charset.forName("CP437"))) {
                 ZipEntry entry;
                 while ((entry = zis.getNextEntry()) != null) {
                     if (entry.isDirectory()) continue;

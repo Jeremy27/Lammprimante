@@ -11,19 +11,24 @@ import javax.imageio.ImageIO;
 import javax.print.PrintServiceLookup;
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeCellRenderer;
+import javax.swing.tree.DefaultTreeModel;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.dnd.*;
 import java.io.File;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.List;
 
 public class MainWindow extends JFrame {
 
     private final FileImportService fileImportService = new FileImportService();
 
-    private final DefaultListModel<File> fileListModel = new DefaultListModel<>();
-    private final JList<File> fileList = new JList<>(fileListModel);
+    private final DefaultMutableTreeNode treeRoot = new DefaultMutableTreeNode("Fichiers");
+    private final DefaultTreeModel treeModel = new DefaultTreeModel(treeRoot);
+    private final JTree fileTree = new JTree(treeModel);
+    private final List<File> allFiles = new ArrayList<>();
     private final JComboBox<javax.print.PrintService> printerCombo;
     private final JSpinner batchSizeSpinner = new JSpinner(new SpinnerNumberModel(15, 1, 100, 1));
     private final JSpinner copiesSpinner = new JSpinner(new SpinnerNumberModel(1, 1, 99, 1));
@@ -41,14 +46,19 @@ public class MainWindow extends JFrame {
     public MainWindow() {
         super("Lammprimante");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setSize(750, 600);
+        setSize(PreferencesManager.getWindowWidth(), PreferencesManager.getWindowHeight());
         setMinimumSize(new Dimension(600, 500));
-        setLocationRelativeTo(null);
+        if (PreferencesManager.getWindowX() >= 0) {
+            setLocation(PreferencesManager.getWindowX(), PreferencesManager.getWindowY());
+        } else {
+            setLocationRelativeTo(null);
+        }
         loadIcon();
 
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosing(java.awt.event.WindowEvent e) {
+                PreferencesManager.setWindowBounds(getX(), getY(), getWidth(), getHeight());
                 fileImportService.cleanup();
             }
         });
@@ -67,13 +77,14 @@ public class MainWindow extends JFrame {
         orientationCombo.addActionListener(e -> PreferencesManager.setOrientation(orientationCombo.getSelectedIndex()));
         colorCombo.addActionListener(e -> PreferencesManager.setColor(colorCombo.getSelectedIndex()));
 
-        fileList.setCellRenderer(new DefaultListCellRenderer() {
+        fileTree.setRootVisible(false);
+        fileTree.setShowsRootHandles(true);
+        fileTree.setCellRenderer(new DefaultTreeCellRenderer() {
             @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
-                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                if (value instanceof File f) {
-                    setText(fileImportService.getDisplayName(f));
-                    setToolTipText(f.getAbsolutePath());
+            public Component getTreeCellRendererComponent(JTree tree, Object value, boolean sel, boolean expanded, boolean leaf, int row, boolean hasFocus) {
+                super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
+                if (value instanceof DefaultMutableTreeNode node && node.getUserObject() instanceof String name) {
+                    setText(name);
                 }
                 return this;
             }
@@ -134,9 +145,9 @@ public class MainWindow extends JFrame {
     private JPanel createFilePanel() {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
         panel.setBorder(BorderFactory.createTitledBorder("Fichiers (glisser-déposer PDF, images, ZIP ou dossiers ici)"));
-        panel.add(new JScrollPane(fileList), BorderLayout.CENTER);
+        panel.add(new JScrollPane(fileTree), BorderLayout.CENTER);
 
-        new DropTarget(fileList, new DropTargetAdapter() {
+        new DropTarget(fileTree, new DropTargetAdapter() {
             @Override
             public void drop(DropTargetDropEvent e) {
                 try {
@@ -165,22 +176,21 @@ public class MainWindow extends JFrame {
         gbc.insets = new Insets(3, 5, 3, 5);
         gbc.anchor = GridBagConstraints.WEST;
 
-        // Ligne 1
+        // Ligne 1 : Imprimante + Thème
         gbc.gridx = 0; gbc.gridy = 0;
         panel.add(new JLabel("Imprimante :"), gbc);
-        gbc.gridx = 1; gbc.gridwidth = 3; gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.HORIZONTAL;
         panel.add(printerCombo, gbc);
-        gbc.gridwidth = 1; gbc.fill = GridBagConstraints.NONE;
-
-        gbc.gridx = 4;
+        gbc.weightx = 0; gbc.fill = GridBagConstraints.NONE;
+        gbc.gridx = 2;
         panel.add(new JLabel("Thème :"), gbc);
-        gbc.gridx = 5;
+        gbc.gridx = 3;
         JComboBox<String> themeCombo = new JComboBox<>(ThemeManager.getThemeNames().toArray(new String[0]));
         themeCombo.setSelectedItem(ThemeManager.getSavedTheme());
         themeCombo.addActionListener(e -> ThemeManager.apply((String) themeCombo.getSelectedItem(), this));
         panel.add(themeCombo, gbc);
 
-        // Ligne 2
+        // Ligne 2 : Recto/Verso + Orientation
         gbc.gridx = 0; gbc.gridy = 1;
         panel.add(new JLabel("Recto/Verso :"), gbc);
         gbc.gridx = 1;
@@ -189,23 +199,25 @@ public class MainWindow extends JFrame {
         panel.add(new JLabel("Orientation :"), gbc);
         gbc.gridx = 3;
         panel.add(orientationCombo, gbc);
-        gbc.gridx = 4;
-        panel.add(new JLabel("Couleur :"), gbc);
-        gbc.gridx = 5;
-        panel.add(colorCombo, gbc);
 
-        // Ligne 3
+        // Ligne 3 : Couleur + Pages par lot
         gbc.gridx = 0; gbc.gridy = 2;
-        panel.add(new JLabel("Pages par lot :"), gbc);
+        panel.add(new JLabel("Couleur :"), gbc);
         gbc.gridx = 1;
-        panel.add(batchSizeSpinner, gbc);
+        panel.add(colorCombo, gbc);
         gbc.gridx = 2;
-        panel.add(new JLabel("Pages par feuille :"), gbc);
+        panel.add(new JLabel("Pages par lot :"), gbc);
         gbc.gridx = 3;
+        panel.add(batchSizeSpinner, gbc);
+
+        // Ligne 4 : Pages par feuille + Copies
+        gbc.gridx = 0; gbc.gridy = 3;
+        panel.add(new JLabel("Pages par feuille :"), gbc);
+        gbc.gridx = 1;
         panel.add(pagesPerSheetCombo, gbc);
-        gbc.gridx = 4;
+        gbc.gridx = 2;
         panel.add(new JLabel("Copies :"), gbc);
-        gbc.gridx = 5;
+        gbc.gridx = 3;
         panel.add(copiesSpinner, gbc);
 
         return panel;
@@ -249,35 +261,32 @@ public class MainWindow extends JFrame {
     }
 
     private void importFiles(List<File> files) {
-        LogService.info("Import de " + files.size() + " fichier(s)");
-        logArea.append("Import de " + files.size() + " fichier(s)...\n");
+        LogService.info("Import de " + files.size() + " élément(s)");
+        logArea.append("Import en cours...\n");
         setControlsEnabled(false);
+        progressBar.setIndeterminate(true);
+        progressBar.setString("Chargement...");
 
-        SwingWorker<FileImportService.ImportResult, String> worker = new SwingWorker<>() {
+        SwingWorker<FileImportService.ImportResult, Void> worker = new SwingWorker<>() {
             @Override
             protected FileImportService.ImportResult doInBackground() {
-                return fileImportService.importFiles(files, displayName -> publish("  + " + displayName));
-            }
-
-            @Override
-            protected void process(java.util.List<String> chunks) {
-                for (String msg : chunks) {
-                    logArea.append(msg + "\n");
-                    LogService.info("Fichier ajouté :" + msg.substring(3));
-                }
-                logArea.setCaretPosition(logArea.getDocument().getLength());
+                return fileImportService.importFiles(files, displayName -> {});
             }
 
             @Override
             protected void done() {
+                progressBar.setIndeterminate(false);
+                progressBar.setString("");
+                progressBar.setValue(0);
                 try {
                     FileImportService.ImportResult result = get();
 
                     for (File f : result.accepted()) {
-                        if (!fileListModel.contains(f)) {
-                            fileListModel.addElement(f);
+                        if (!allFiles.contains(f)) {
+                            allFiles.add(f);
                         }
                     }
+                    rebuildTree();
 
                     if (!result.rejected().isEmpty()) {
                         logArea.append("Fichiers ignorés (format non supporté) :\n");
@@ -307,6 +316,50 @@ public class MainWindow extends JFrame {
         worker.execute();
     }
 
+    private void rebuildTree() {
+        treeRoot.removeAllChildren();
+        SwingUtilities.updateComponentTreeUI(fileTree);
+
+        // Group files by their display path segments
+        Map<String, DefaultMutableTreeNode> folderNodes = new LinkedHashMap<>();
+
+        for (File f : allFiles) {
+            String displayName = fileImportService.getDisplayName(f);
+            String[] parts = displayName.split("/");
+
+            if (parts.length == 1) {
+                // File at root level
+                treeRoot.add(new DefaultMutableTreeNode(parts[0]));
+            } else {
+                // File inside a folder/zip — build path incrementally
+                DefaultMutableTreeNode parent = treeRoot;
+                StringBuilder pathKey = new StringBuilder();
+                for (int i = 0; i < parts.length - 1; i++) {
+                    if (i > 0) pathKey.append("/");
+                    pathKey.append(parts[i]);
+                    String key = pathKey.toString();
+
+                    if (!folderNodes.containsKey(key)) {
+                        DefaultMutableTreeNode folderNode = new DefaultMutableTreeNode(parts[i]);
+                        parent.add(folderNode);
+                        folderNodes.put(key, folderNode);
+                    }
+                    parent = folderNodes.get(key);
+                }
+                parent.add(new DefaultMutableTreeNode(parts[parts.length - 1]));
+            }
+        }
+
+        treeModel.reload();
+        expandAllNodes();
+    }
+
+    private void expandAllNodes() {
+        for (int i = 0; i < fileTree.getRowCount(); i++) {
+            fileTree.expandRow(i);
+        }
+    }
+
     private void addFiles() {
         JFileChooser chooser = new JFileChooser();
         chooser.setMultiSelectionEnabled(true);
@@ -318,14 +371,34 @@ public class MainWindow extends JFrame {
     }
 
     private void removeSelected() {
-        int[] indices = fileList.getSelectedIndices();
-        for (int i = indices.length - 1; i >= 0; i--) {
-            fileListModel.remove(indices[i]);
+        var paths = fileTree.getSelectionPaths();
+        if (paths == null) return;
+
+        Set<String> removedDisplayNames = new HashSet<>();
+        for (var path : paths) {
+            // Build display name from tree path
+            StringBuilder name = new StringBuilder();
+            for (int i = 1; i < path.getPathCount(); i++) {
+                if (i > 1) name.append("/");
+                name.append(path.getPathComponent(i).toString());
+            }
+            removedDisplayNames.add(name.toString());
         }
+
+        // Remove files matching selected display names (or whose display name starts with a selected folder)
+        allFiles.removeIf(f -> {
+            String dn = fileImportService.getDisplayName(f);
+            for (String sel : removedDisplayNames) {
+                if (dn.equals(sel) || dn.startsWith(sel + "/")) return true;
+            }
+            return false;
+        });
+
+        rebuildTree();
     }
 
     private void startPrinting() {
-        if (fileListModel.isEmpty()) {
+        if (allFiles.isEmpty()) {
             JOptionPane.showMessageDialog(this, "Aucun fichier sélectionné.", "Attention", JOptionPane.WARNING_MESSAGE);
             return;
         }
@@ -336,10 +409,7 @@ public class MainWindow extends JFrame {
         }
         PrintSettings settings = buildPrintSettings();
 
-        List<File> files = new ArrayList<>();
-        for (int i = 0; i < fileListModel.size(); i++) {
-            files.add(fileListModel.get(i));
-        }
+        List<File> files = new ArrayList<>(allFiles);
 
         setControlsEnabled(false);
         logArea.setText("");
