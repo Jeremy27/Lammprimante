@@ -1,5 +1,6 @@
 package fr.courel.lammprimante.view;
 
+import fr.courel.lammprimante.App;
 import fr.courel.lammprimante.config.PreferencesManager;
 import fr.courel.lammprimante.config.ThemeManager;
 import fr.courel.lammprimante.model.PrintSettings;
@@ -44,7 +45,7 @@ public class MainWindow extends JFrame {
     private final JProgressBar progressBar = new JProgressBar();
 
     public MainWindow() {
-        super("Lammprimante");
+        super("Lammprimante v" + App.getVersion());
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setSize(PreferencesManager.getWindowWidth(), PreferencesManager.getWindowHeight());
         setMinimumSize(new Dimension(600, 500));

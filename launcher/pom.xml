@@ -45,6 +45,7 @@
                             <outfile>${project.build.directory}/LammprimanteLauncher.exe</outfile>
                             <jar>${project.build.directory}/${project.build.finalName}.jar</jar>
                             <errTitle>Lammprimante Launcher</errTitle>
+                            <icon>${project.basedir}/../src/main/resources/logo.ico</icon>
                             <jre>
                                 <path>./jre</path>
                                 <minVersion>17</minVersion>
