@@ -8,8 +8,16 @@ import javax.swing.*;
 
 public class App {
 
+    public static String getVersion() {
+        try (var is = App.class.getResourceAsStream("/version.txt")) {
+            return is != null ? new String(is.readAllBytes()).trim() : "inconnue";
+        } catch (Exception e) {
+            return "inconnue";
+        }
+    }
+
     public static void main(String[] args) {
-        LogService.info("Démarrage de Lammprimante");
+        LogService.info("Démarrage de Lammprimante v" + getVersion());
         SwingUtilities.invokeLater(() -> {
             ThemeManager.applySaved();
             new MainWindow().setVisible(true);
