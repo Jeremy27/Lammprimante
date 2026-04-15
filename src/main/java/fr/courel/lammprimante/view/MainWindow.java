@@ -30,6 +30,7 @@ public class MainWindow extends JFrame {
     private final DefaultTreeModel treeModel = new DefaultTreeModel(treeRoot);
     private final JTree fileTree = new JTree(treeModel);
     private final List<File> allFiles = new ArrayList<>();
+    private final Map<File, Integer> resumePages = new HashMap<>();
     private final JComboBox<javax.print.PrintService> printerCombo;
     private final JSpinner batchSizeSpinner = new JSpinner(new SpinnerNumberModel(15, 1, 100, 1));
     private final JSpinner copiesSpinner = new JSpinner(new SpinnerNumberModel(1, 1, 99, 1));
@@ -294,6 +295,7 @@ public class MainWindow extends JFrame {
                         if (!allFiles.contains(f)) {
                             allFiles.add(f);
                         }
+                        resumePages.remove(f);
                     }
                     rebuildTree();
 
@@ -398,7 +400,10 @@ public class MainWindow extends JFrame {
         allFiles.removeIf(f -> {
             String dn = fileImportService.getDisplayName(f);
             for (String sel : removedDisplayNames) {
-                if (dn.equals(sel) || dn.startsWith(sel + "/")) return true;
+                if (dn.equals(sel) || dn.startsWith(sel + "/")) {
+                    resumePages.remove(f);
+                    return true;
+                }
             }
             return false;
         });
@@ -428,6 +433,7 @@ public class MainWindow extends JFrame {
 
         LogService.info("Lancement impression : " + files.size() + " fichier(s), imprimante=" + printer.getName());
 
+        List<File> failedFiles = new ArrayList<>();
         SwingWorker<Void, String> worker = new SwingWorker<>() {
             @Override
             protected Void doInBackground() {
@@ -437,27 +443,41 @@ public class MainWindow extends JFrame {
                         return null;
                     }
                     File file = files.get(i);
+                    int startPage = resumePages.getOrDefault(file, 0);
                     try {
-                        service.print(file, printer, settings, progress -> {
+                        service.print(file, printer, settings, startPage, progress -> {
                             String msg = String.format("[%s] Lot %d/%d (pages %d à %d) envoyé",
                                     progress.fileName(), progress.batchNumber(), progress.totalBatches(),
                                     progress.fromPage(), progress.toPage());
                             publish(msg);
                             LogService.info(msg);
                         });
+                        resumePages.remove(file);
                         int current = i + 1;
                         SwingUtilities.invokeLater(() -> {
                             progressBar.setValue(current);
                             progressBar.setString(current + " / " + files.size());
                         });
+                    } catch (PrintService.PartialPrintException ex) {
+                        if (isCancelled() || Thread.currentThread().isInterrupted()) {
+                            return null;
+                        }
+                        int resume = ex.getResumePage();
+                        resumePages.put(file, resume);
+                        String raw = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
+                        String friendly = "Le spooler a interrompu l'envoi après plusieurs tentatives — reprise prévue à la page " + (resume + 1);
+                        publish("ERREUR [" + file.getName() + "] : " + friendly);
+                        LogService.error("Impression partielle pour " + file.getName() + " — reprise page " + (resume + 1) + " — " + raw, ex);
+                        failedFiles.add(file);
                     } catch (java.awt.print.PrinterException ex) {
                         if (isCancelled() || Thread.currentThread().isInterrupted()) {
                             return null;
                         }
                         String raw = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
-                        String friendly = "Le spooler Windows a interrompu l'envoi (fichier trop gros ou imprimante occupée) — relancer ce fichier seul";
+                        String friendly = "Le spooler a interrompu l'envoi après plusieurs tentatives (imprimante occupée ou hors ligne)";
                         publish("ERREUR [" + file.getName() + "] : " + friendly);
                         LogService.error("Impression échouée pour " + file.getName() + " — " + raw, ex);
+                        failedFiles.add(file);
                     } catch (Exception ex) {
                         if (isCancelled() || Thread.currentThread().isInterrupted()) {
                             return null;
@@ -465,6 +485,7 @@ public class MainWindow extends JFrame {
                         String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
                         publish("ERREUR [" + file.getName() + "] : " + msg);
                         LogService.error("Impression échouée pour " + file.getName(), ex);
+                        failedFiles.add(file);
                     }
                 }
                 return null;
@@ -490,11 +511,18 @@ public class MainWindow extends JFrame {
                     LogService.info("Impression annulée par l'utilisateur");
                 } else {
                     logArea.append("--- Terminé ---\n");
-                    if (logArea.getText().contains("ERREUR")) {
+                    if (!failedFiles.isEmpty()) {
                         logArea.append("Détails des erreurs dans : " + LogService.getLogFile() + "\n");
+                        logArea.append(failedFiles.size() + " fichier(s) non imprimé(s) rechargé(s) — cliquer sur Imprimer pour réessayer\n");
+                        allFiles.clear();
+                        allFiles.addAll(failedFiles);
+                        rebuildTree();
+                        progressBar.setString(failedFiles.size() + " en échec");
+                        LogService.info("Impression terminée avec " + failedFiles.size() + " échec(s), fichiers rechargés dans la liste");
+                    } else {
+                        progressBar.setString("Terminé");
+                        LogService.info("Impression terminée");
                     }
-                    progressBar.setString("Terminé");
-                    LogService.info("Impression terminée");
                 }
                 logArea.setCaretPosition(logArea.getDocument().getLength());
             }

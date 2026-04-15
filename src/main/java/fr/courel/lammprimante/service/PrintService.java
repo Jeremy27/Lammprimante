@@ -20,22 +20,35 @@ import java.util.function.Consumer;
 
 public class PrintService {
 
-    private static final int MAX_RETRY = 1;
-    private static final long RETRY_DELAY_MS = 2000L;
+    private static final long[] RETRY_DELAYS_MS = {2_000L, 10_000L, 30_000L};
 
     public record PrintProgress(String fileName, int batchNumber, int totalBatches, int fromPage, int toPage) {}
 
+    public static class PartialPrintException extends Exception {
+        private final int resumePage;
+        public PartialPrintException(int resumePage, Throwable cause) {
+            super(cause.getMessage(), cause);
+            this.resumePage = resumePage;
+        }
+        public int getResumePage() { return resumePage; }
+    }
+
     public void print(File file, javax.print.PrintService printer, PrintSettings settings,
                       Consumer<PrintProgress> onProgress) throws Exception {
+        print(file, printer, settings, 0, onProgress);
+    }
+
+    public void print(File file, javax.print.PrintService printer, PrintSettings settings,
+                      int startPage, Consumer<PrintProgress> onProgress) throws Exception {
         if (FileImportService.isImage(file)) {
             printImage(file, printer, settings, onProgress);
         } else {
-            printPdf(file, printer, settings, onProgress);
+            printPdf(file, printer, settings, startPage, onProgress);
         }
     }
 
     private void printPdf(File pdfFile, javax.print.PrintService printer, PrintSettings settings,
-                          Consumer<PrintProgress> onProgress) throws Exception {
+                          int startPage, Consumer<PrintProgress> onProgress) throws Exception {
         try (PDDocument loaded = Loader.loadPDF(pdfFile)) {
             PDDocument document = loaded;
             PDDocument composed = null;
@@ -47,23 +60,31 @@ public class PrintService {
 
                 int totalPages = document.getNumberOfPages();
                 int batchSize = settings.batchSize();
-                int totalBatches = (int) Math.ceil((double) totalPages / batchSize);
+                int clampedStart = Math.max(0, Math.min(startPage, totalPages));
+                int remainingPages = totalPages - clampedStart;
+                int totalBatches = remainingPages == 0 ? 0 : (int) Math.ceil((double) remainingPages / batchSize);
 
+                int fromPage = clampedStart;
                 for (int batch = 0; batch < totalBatches; batch++) {
                     if (Thread.currentThread().isInterrupted()) {
                         throw new InterruptedException("Impression annulée");
                     }
-                    int fromPage = batch * batchSize;
                     int toPage = Math.min(fromPage + batchSize, totalPages);
 
                     String jobName = pdfFile.getName() + " - lot " + (batch + 1) + "/" + totalBatches;
                     HashPrintRequestAttributeSet attrs = new HashPrintRequestAttributeSet(settings.toAttributes());
                     attrs.add(new PageRanges(fromPage + 1, toPage));
 
-                    printWithRetry(printer, document, jobName, attrs, pdfFile.getName(), batch + 1, totalBatches);
+                    try {
+                        printWithRetry(printer, document, jobName, attrs, pdfFile.getName(), batch + 1, totalBatches);
+                    } catch (PrinterException ex) {
+                        throw new PartialPrintException(fromPage, ex);
+                    }
 
                     onProgress.accept(new PrintProgress(
                             pdfFile.getName(), batch + 1, totalBatches, fromPage + 1, toPage));
+
+                    fromPage = toPage;
                 }
             } finally {
                 if (composed != null) {
@@ -77,7 +98,7 @@ public class PrintService {
                                 HashPrintRequestAttributeSet attrs, String fileName,
                                 int batchNumber, int totalBatches) throws PrinterException {
         PrinterException lastError = null;
-        int totalAttempts = MAX_RETRY + 1;
+        int totalAttempts = RETRY_DELAYS_MS.length + 1;
         for (int attempt = 1; attempt <= totalAttempts; attempt++) {
             PrinterJob job = PrinterJob.getPrinterJob();
             job.setPrintService(printer);
@@ -93,11 +114,12 @@ public class PrintService {
             } catch (PrinterException ex) {
                 lastError = ex;
                 if (attempt < totalAttempts) {
+                    long delay = RETRY_DELAYS_MS[attempt - 1];
                     LogService.warn("[" + fileName + "] Lot " + batchNumber + "/" + totalBatches
                             + " : échec spooler (tentative " + attempt + "/" + totalAttempts
-                            + "), nouvelle tentative dans " + (RETRY_DELAY_MS / 1000) + "s");
+                            + "), nouvelle tentative dans " + (delay / 1000) + "s");
                     try {
-                        Thread.sleep(RETRY_DELAY_MS);
+                        Thread.sleep(delay);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         throw new PrinterException("Impression interrompue");
