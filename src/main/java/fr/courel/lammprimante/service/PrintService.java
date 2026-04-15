@@ -56,14 +56,14 @@ public class PrintService {
                     int fromPage = batch * batchSize;
                     int toPage = Math.min(fromPage + batchSize, totalPages);
 
-                    onProgress.accept(new PrintProgress(
-                            pdfFile.getName(), batch + 1, totalBatches, fromPage + 1, toPage));
-
                     String jobName = pdfFile.getName() + " - lot " + (batch + 1) + "/" + totalBatches;
                     HashPrintRequestAttributeSet attrs = new HashPrintRequestAttributeSet(settings.toAttributes());
                     attrs.add(new PageRanges(fromPage + 1, toPage));
 
                     printWithRetry(printer, document, jobName, attrs, pdfFile.getName(), batch + 1, totalBatches);
+
+                    onProgress.accept(new PrintProgress(
+                            pdfFile.getName(), batch + 1, totalBatches, fromPage + 1, toPage));
                 }
             } finally {
                 if (composed != null) {
