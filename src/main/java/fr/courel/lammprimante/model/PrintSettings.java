@@ -27,11 +27,19 @@ public record PrintSettings(
         });
 
         attrs.add(color == ColorMode.MONOCHROME ? Chromaticity.MONOCHROME : Chromaticity.COLOR);
-        attrs.add(orientation == Orientation.LANDSCAPE ? OrientationRequested.LANDSCAPE : OrientationRequested.PORTRAIT);
 
-        if (pagesPerSheet > 1) {
-            attrs.add(new NumberUp(pagesPerSheet));
+        // Quand N-up est actif, le doc est déjà recomposé en paysage (2-up) ou portrait (4-up).
+        OrientationRequested effectiveOrientation;
+        if (pagesPerSheet == 2) {
+            effectiveOrientation = OrientationRequested.LANDSCAPE;
+        } else if (pagesPerSheet == 4) {
+            effectiveOrientation = OrientationRequested.PORTRAIT;
+        } else {
+            effectiveOrientation = orientation == Orientation.LANDSCAPE
+                    ? OrientationRequested.LANDSCAPE
+                    : OrientationRequested.PORTRAIT;
         }
+        attrs.add(effectiveOrientation);
 
         return attrs;
     }

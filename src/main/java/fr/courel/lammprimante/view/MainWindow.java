@@ -40,9 +40,11 @@ public class MainWindow extends JFrame {
     private final JComboBox<String> colorCombo = new JComboBox<>(new String[]{"Couleur", "Noir et blanc"});
     private final JTextArea logArea = new JTextArea();
     private final JButton printButton = new JButton("Imprimer");
+    private final JButton cancelButton = new JButton("Annuler");
     private final JButton addButton = new JButton("Ajouter des fichiers...");
     private final JButton removeButton = new JButton("Retirer");
     private final JProgressBar progressBar = new JProgressBar();
+    private SwingWorker<Void, String> currentWorker;
 
     public MainWindow() {
         super("Lammprimante v" + App.getVersion());
@@ -101,6 +103,8 @@ public class MainWindow extends JFrame {
         addButton.addActionListener(e -> addFiles());
         removeButton.addActionListener(e -> removeSelected());
         printButton.addActionListener(e -> startPrinting());
+        cancelButton.addActionListener(e -> cancelPrinting());
+        cancelButton.setEnabled(false);
     }
 
     private void loadIcon() {
@@ -238,7 +242,11 @@ public class MainWindow extends JFrame {
         progressBar.setStringPainted(true);
         progressBar.setString("");
         actionPanel.add(progressBar, BorderLayout.CENTER);
-        actionPanel.add(printButton, BorderLayout.EAST);
+
+        JPanel buttonsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        buttonsPanel.add(cancelButton);
+        buttonsPanel.add(printButton);
+        actionPanel.add(buttonsPanel, BorderLayout.EAST);
         panel.add(actionPanel, BorderLayout.SOUTH);
 
         return panel;
@@ -413,6 +421,7 @@ public class MainWindow extends JFrame {
         List<File> files = new ArrayList<>(allFiles);
 
         setControlsEnabled(false);
+        cancelButton.setEnabled(true);
         logArea.setText("");
         progressBar.setValue(0);
         progressBar.setMaximum(files.size());
@@ -424,6 +433,9 @@ public class MainWindow extends JFrame {
             protected Void doInBackground() {
                 PrintService service = new PrintService();
                 for (int i = 0; i < files.size(); i++) {
+                    if (isCancelled() || Thread.currentThread().isInterrupted()) {
+                        return null;
+                    }
                     File file = files.get(i);
                     try {
                         service.print(file, printer, settings, progress -> {
@@ -438,7 +450,18 @@ public class MainWindow extends JFrame {
                             progressBar.setValue(current);
                             progressBar.setString(current + " / " + files.size());
                         });
+                    } catch (java.awt.print.PrinterException ex) {
+                        if (isCancelled() || Thread.currentThread().isInterrupted()) {
+                            return null;
+                        }
+                        String raw = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
+                        String friendly = "Le spooler Windows a interrompu l'envoi (fichier trop gros ou imprimante occupée) — relancer ce fichier seul";
+                        publish("ERREUR [" + file.getName() + "] : " + friendly);
+                        LogService.error("Impression échouée pour " + file.getName() + " — " + raw, ex);
                     } catch (Exception ex) {
+                        if (isCancelled() || Thread.currentThread().isInterrupted()) {
+                            return null;
+                        }
                         String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
                         publish("ERREUR [" + file.getName() + "] : " + msg);
                         LogService.error("Impression échouée pour " + file.getName(), ex);
@@ -458,16 +481,36 @@ public class MainWindow extends JFrame {
             @Override
             protected void done() {
                 setControlsEnabled(true);
-                logArea.append("--- Terminé ---\n");
-                if (logArea.getText().contains("ERREUR")) {
-                    logArea.append("Détails des erreurs dans : " + LogService.getLogFile() + "\n");
+                cancelButton.setEnabled(false);
+                currentWorker = null;
+                boolean cancelled = isCancelled();
+                if (cancelled) {
+                    logArea.append("--- Annulé ---\n");
+                    progressBar.setString("Annulé");
+                    LogService.info("Impression annulée par l'utilisateur");
+                } else {
+                    logArea.append("--- Terminé ---\n");
+                    if (logArea.getText().contains("ERREUR")) {
+                        logArea.append("Détails des erreurs dans : " + LogService.getLogFile() + "\n");
+                    }
+                    progressBar.setString("Terminé");
+                    LogService.info("Impression terminée");
                 }
                 logArea.setCaretPosition(logArea.getDocument().getLength());
-                progressBar.setString("Terminé");
-                LogService.info("Impression terminée");
             }
         };
+        currentWorker = worker;
         worker.execute();
+    }
+
+    private void cancelPrinting() {
+        if (currentWorker == null || currentWorker.isDone()) {
+            return;
+        }
+        cancelButton.setEnabled(false);
+        logArea.append("Annulation demandée — le lot en cours va se terminer…\n");
+        LogService.info("Annulation demandée");
+        currentWorker.cancel(true);
     }
 
     private void setControlsEnabled(boolean enabled) {

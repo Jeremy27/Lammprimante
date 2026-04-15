@@ -34,6 +34,10 @@ public class LogService {
         write("INFO", message);
     }
 
+    public static void warn(String message) {
+        write("WARN", message);
+    }
+
     public static void error(String message) {
         write("ERROR", message);
     }
