@@ -12,9 +12,14 @@ public class PreferencesManager {
     private static final String PREF_ORIENTATION = "orientation";
     private static final String PREF_COLOR = "color";
 
-    // Thème
+    // Thème : "light" ou "dark"
     public static String getTheme() {
-        return PREFS.get(PREF_THEME, "Sombre");
+        String raw = PREFS.get(PREF_THEME, "dark");
+        // Migration des anciennes valeurs (mdlaf) vers light/dark
+        return switch (raw.toLowerCase()) {
+            case "clair", "light" -> "light";
+            default -> "dark";
+        };
     }
 
     public static void setTheme(String theme) {

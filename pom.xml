@@ -10,8 +10,8 @@
     <packaging>jar</packaging>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -22,9 +22,9 @@
             <version>3.0.4</version>
         </dependency>
         <dependency>
-            <groupId>io.github.vincenzopalazzo</groupId>
-            <artifactId>material-ui-swing</artifactId>
-            <version>1.1.4</version>
+            <groupId>fr.courel</groupId>
+            <artifactId>lammui</artifactId>
+            <version>1.1.0</version>
         </dependency>
     </dependencies>
 
@@ -95,7 +95,7 @@
                             <icon>${project.basedir}/src/main/resources/logo.ico</icon>
                             <jre>
                                 <path>./jre</path>
-                                <minVersion>17</minVersion>
+                                <minVersion>25</minVersion>
                             </jre>
                             <versionInfo>
                                 <fileVersion>1.0.0.0</fileVersion>

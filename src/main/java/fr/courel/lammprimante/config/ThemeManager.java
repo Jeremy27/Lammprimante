@@ -1,50 +1,26 @@
 package fr.courel.lammprimante.config;
 
-import mdlaf.MaterialLookAndFeel;
-import mdlaf.themes.*;
+import fr.courel.lammui.theme.LammTheme;
 
-import javax.swing.*;
-import java.awt.*;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Set;
+/**
+ * Petite façade au-dessus de LammTheme pour persister le choix light/dark.
+ */
+public final class ThemeManager {
 
-public class ThemeManager {
+    public static final String LIGHT = "light";
+    public static final String DARK = "dark";
 
-    private static final Map<String, MaterialTheme> THEMES = new LinkedHashMap<>();
-    static {
-        THEMES.put("Sombre", new MaterialOceanicTheme());
-        THEMES.put("Clair", new MaterialLiteTheme());
-        THEMES.put("Sombre contrasté", new JMarsDarkTheme());
-    }
-
-    public static Set<String> getThemeNames() {
-        return THEMES.keySet();
-    }
-
-    public static String getSavedTheme() {
-        return PreferencesManager.getTheme();
-    }
+    private ThemeManager() {}
 
     public static void applySaved() {
-        String savedTheme = getSavedTheme();
-        MaterialTheme theme = THEMES.getOrDefault(savedTheme, THEMES.get("Sombre"));
-        try {
-            UIManager.setLookAndFeel(new MaterialLookAndFeel(theme));
-        } catch (Exception ignored) {}
+        LammTheme.setTheme(isDarkSaved() ? new LammTheme.Dark() : new LammTheme.Light());
     }
 
-    public static void apply(String themeName, Component root) {
-        MaterialTheme theme = THEMES.get(themeName);
-        if (theme == null) return;
-        try {
-            UIManager.setLookAndFeel(new MaterialLookAndFeel(theme));
-            SwingUtilities.updateComponentTreeUI(root);
-            PreferencesManager.setTheme(themeName);
-        } catch (UnsupportedLookAndFeelException ex) {
-            JOptionPane.showMessageDialog(root,
-                    "Impossible d'appliquer le thème : " + ex.getMessage(),
-                    "Erreur", JOptionPane.ERROR_MESSAGE);
-        }
+    public static boolean isDarkSaved() {
+        return DARK.equalsIgnoreCase(PreferencesManager.getTheme());
+    }
+
+    public static void save(boolean dark) {
+        PreferencesManager.setTheme(dark ? DARK : LIGHT);
     }
 }
