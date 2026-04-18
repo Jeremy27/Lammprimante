@@ -15,15 +15,31 @@ Application d'impression par lots de documents PDF, images et ZIP.
 ## Stack
 
 - Java 25
-- Swing + [LammUI](../LammUI) pour l'identité visuelle
+- Swing + [LammUI](https://github.com/Jeremy27/LammUI) (récupérée depuis GitHub Packages)
 - PDFBox 3.0 pour le rendu et le découpage PDF
-- Launch4j pour l'exe Windows
+- `jpackage` pour générer les installateurs natifs
 
 ## Prérequis
 
 - Java 25+
 - Maven 3.9+
-- LammUI installé localement (`cd ../LammUI && mvn install`)
+- Accès à GitHub Packages pour tirer LammUI (cf. section ci-dessous)
+
+## Accès à LammUI depuis GitHub Packages
+
+LammUI est publiée sur `https://maven.pkg.github.com/Jeremy27/LammUI`. Maven a besoin d'un token pour la télécharger. Dans `~/.m2/settings.xml` :
+
+```xml
+<servers>
+    <server>
+        <id>github-lammui</id>
+        <username>Jeremy27</username>
+        <password>PASTE_YOUR_PAT_HERE</password>
+    </server>
+</servers>
+```
+
+Le PAT doit avoir le scope `read:packages` (à générer sur https://github.com/settings/tokens/new).
 
 ## Build
 
@@ -31,9 +47,7 @@ Application d'impression par lots de documents PDF, images et ZIP.
 mvn package
 ```
 
-Produit :
-- `target/lammprimante-X.Y.jar` (uber jar shadé)
-- `target/Lammprimante.exe` (wrapper Windows via Launch4j)
+Produit `target/lammprimante-X.Y.jar` (uber jar shadé).
 
 ## Lancement
 
@@ -41,21 +55,35 @@ Produit :
 java -jar target/lammprimante-X.Y.jar
 ```
 
-## Distribution Windows
+## Installateurs natifs
 
-Le zip Windows inclut un JRE embarqué minimal (généré via `jlink`, modules `java.base, java.desktop, java.logging, java.prefs`).
+Générés via `jpackage`, qui crée un JRE minimal embarqué (modules `java.base, java.desktop, java.logging, java.prefs`).
 
-**Prérequis** : JDK Windows 25 full (avec jmods) extrait dans `~/tools/jdk25-win/`. Récupérable chez Liberica :
+### Linux (.deb)
+
+Prérequis système : `fakeroot` et `binutils` (`sudo apt install fakeroot binutils`).
 
 ```bash
-curl -sL -o /tmp/jdk.zip "https://github.com/bell-sw/Liberica/releases/download/25.0.1+13/bellsoft-jdk25.0.1+13-windows-amd64-full.zip"
-mkdir -p ~/tools && cd ~/tools && unzip -q /tmp/jdk.zip && mv jdk-25* jdk25-win
+mvn -Pdist-linux clean package
 ```
 
-Build :
+Produit `target/lammprimante_X.Y_amd64.deb` (~25 Mo). Installation : `sudo dpkg -i target/lammprimante_*.deb` → Lammprimante installée dans `/opt/lammprimante`, entrée de menu créée.
+
+### Windows (.msi)
+
+Prérequis système : WiX Toolset 3.x dans le PATH.
 
 ```bash
 mvn -Pdist-win clean package
 ```
 
-Produit `target/Lammprimante-Windows.zip` (~45 Mo) contenant `Lammprimante.exe` + `jre/`. L'utilisatrice dézippe et double-clique sur l'exe.
+Produit `target/Lammprimante-X.Y.msi`. Installation : double-clic → wizard, raccourci menu Démarrer + bureau, désinstallable via "Ajouter/Supprimer programmes".
+
+## Release automatique
+
+Un tag `vX.Y` poussé sur le repo déclenche le workflow `.github/workflows/release.yml` qui :
+1. Vérifie que la version du pom matche le tag
+2. Build le `.deb` (runner Linux) et le `.msi` (runner Windows) en parallèle
+3. Crée une GitHub Release et y attache les deux installateurs
+
+Workflow recommandé : utiliser [Lammrelease](https://github.com/Jeremy27/Lammrelease) pour bumper + tag + push — le reste est automatisé.
