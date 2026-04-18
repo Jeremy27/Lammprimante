@@ -43,4 +43,19 @@ java -jar target/lammprimante-X.Y.jar
 
 ## Distribution Windows
 
-Le zip Windows inclut un JRE embarqué. L'utilisateur n'a qu'à dézipper et double-cliquer sur `Lammprimante.bat` ou `Lammprimante.exe`.
+Le zip Windows inclut un JRE embarqué minimal (généré via `jlink`, modules `java.base, java.desktop, java.logging, java.prefs`).
+
+**Prérequis** : JDK Windows 25 full (avec jmods) extrait dans `~/tools/jdk25-win/`. Récupérable chez Liberica :
+
+```bash
+curl -sL -o /tmp/jdk.zip "https://github.com/bell-sw/Liberica/releases/download/25.0.1+13/bellsoft-jdk25.0.1+13-windows-amd64-full.zip"
+mkdir -p ~/tools && cd ~/tools && unzip -q /tmp/jdk.zip && mv jdk-25* jdk25-win
+```
+
+Build :
+
+```bash
+mvn -Pdist-win clean package
+```
+
+Produit `target/Lammprimante-Windows.zip` (~45 Mo) contenant `Lammprimante.exe` + `jre/`. L'utilisatrice dézippe et double-clique sur l'exe.

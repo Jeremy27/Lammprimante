@@ -13,6 +13,7 @@
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <jdk.win.home>${user.home}/tools/jdk25-win</jdk.win.home>
     </properties>
 
     <dependencies>
@@ -114,4 +115,59 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>dist-win</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <id>jlink-win</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <fail message="JDK Windows introuvable : ${jdk.win.home}/jmods. Télécharger Liberica JDK Full 25 Windows et extraire dans ${jdk.win.home}.">
+                                            <condition>
+                                                <not>
+                                                    <available file="${jdk.win.home}/jmods" type="dir"/>
+                                                </not>
+                                            </condition>
+                                        </fail>
+                                        <delete dir="${project.build.directory}/jre-win" quiet="true"/>
+                                        <exec executable="jlink" failonerror="true">
+                                            <arg value="--module-path"/>
+                                            <arg value="${jdk.win.home}/jmods"/>
+                                            <arg value="--add-modules"/>
+                                            <arg value="java.base,java.desktop,java.logging,java.prefs"/>
+                                            <arg value="--no-header-files"/>
+                                            <arg value="--no-man-pages"/>
+                                            <arg value="--compress=zip-6"/>
+                                            <arg value="--output"/>
+                                            <arg value="${project.build.directory}/jre-win"/>
+                                        </exec>
+                                        <delete dir="${project.build.directory}/dist-staging" quiet="true"/>
+                                        <mkdir dir="${project.build.directory}/dist-staging/Lammprimante"/>
+                                        <copy file="${project.build.directory}/Lammprimante.exe" todir="${project.build.directory}/dist-staging/Lammprimante"/>
+                                        <copy todir="${project.build.directory}/dist-staging/Lammprimante/jre">
+                                            <fileset dir="${project.build.directory}/jre-win"/>
+                                        </copy>
+                                        <zip destfile="${project.build.directory}/Lammprimante-Windows.zip"
+                                             basedir="${project.build.directory}/dist-staging"/>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
