@@ -18,6 +18,7 @@ import fr.courel.lammui.component.LammProgressBar;
 import fr.courel.lammui.component.LammScrollPane;
 import fr.courel.lammui.component.LammSpinner;
 import fr.courel.lammui.component.LammSwitch;
+import fr.courel.lammui.component.LammWindowControls;
 import fr.courel.lammui.component.LammTextArea;
 import fr.courel.lammui.component.LammTitle;
 import fr.courel.lammui.component.LammTree;
@@ -83,6 +84,7 @@ public class MainWindow extends LammFrame {
 
     public MainWindow() {
         super("Lammprimante v" + App.getVersion());
+        useCustomTitleBar();
         setMinimumSize(new Dimension(700, 600));
         applySavedBounds();
         loadIcon();
@@ -117,8 +119,10 @@ public class MainWindow extends LammFrame {
         logArea.setEditable(false);
 
         setLayout(new BorderLayout());
-        add(buildHeader(), BorderLayout.NORTH);
-        add(buildContent(), BorderLayout.CENTER);
+        var header = buildHeader();
+        makeDraggable(header);
+        add(header, BorderLayout.NORTH);
+        add(new LammScrollPane(buildContent()), BorderLayout.CENTER);
 
         addButton.addActionListener(_ -> addFiles());
         removeButton.addActionListener(_ -> removeSelected());
@@ -164,10 +168,11 @@ public class MainWindow extends LammFrame {
             ThemeManager.save(LammTheme.isDark());
             LammTheme.repaintAll(this);
         });
-        var switchWrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
-        switchWrapper.setOpaque(false);
-        switchWrapper.add(themeSwitch);
-        header.add(switchWrapper, BorderLayout.EAST);
+        var eastPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        eastPanel.setOpaque(false);
+        eastPanel.add(themeSwitch);
+        eastPanel.add(new LammWindowControls(this));
+        header.add(eastPanel, BorderLayout.EAST);
 
         return header;
     }
@@ -230,7 +235,9 @@ public class MainWindow extends LammFrame {
         card.setLayout(new BorderLayout(0, 8));
         card.setTitle("Fichiers (glisser-déposer PDF, images, ZIP ou dossiers ici)");
 
-        card.add(new LammScrollPane(fileTree), BorderLayout.CENTER);
+        var treeScroll = new LammScrollPane(fileTree);
+        treeScroll.setPreferredSize(new Dimension(0, 150));
+        card.add(treeScroll, BorderLayout.CENTER);
 
         new DropTarget(fileTree, new DropTargetAdapter() {
             @Override
