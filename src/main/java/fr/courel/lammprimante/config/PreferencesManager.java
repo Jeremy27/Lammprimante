@@ -28,16 +28,16 @@ public class PreferencesManager {
 
     // Pages par lot
     public static int getBatchSize() {
-        return PREFS.getInt(PREF_BATCH_SIZE, 15);
+        return PREFS.getInt(PREF_BATCH_SIZE, 20);
     }
 
     public static void setBatchSize(int size) {
         PREFS.putInt(PREF_BATCH_SIZE, size);
     }
 
-    // Recto/Verso (index de la combo : 0, 1, 2)
+    // Recto/Verso (index de la combo : 0 = recto seul, 1 = livre, 2 = bloc-notes)
     public static int getDuplex() {
-        return PREFS.getInt(PREF_DUPLEX, 0);
+        return PREFS.getInt(PREF_DUPLEX, 1);
     }
 
     public static void setDuplex(int index) {

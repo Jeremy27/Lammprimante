@@ -59,7 +59,12 @@ public class PrintService {
                 }
 
                 int totalPages = document.getNumberOfPages();
+                // En duplex, un lot impair force le driver à ajouter un verso blanc
+                // avant le job suivant pour éjecter la feuille → on force un batch pair.
                 int batchSize = settings.batchSize();
+                if (settings.duplex() != PrintSettings.DuplexMode.RECTO && batchSize > 1 && batchSize % 2 != 0) {
+                    batchSize--;
+                }
                 int clampedStart = Math.max(0, Math.min(startPage, totalPages));
                 int remainingPages = totalPages - clampedStart;
                 int totalBatches = remainingPages == 0 ? 0 : (int) Math.ceil((double) remainingPages / batchSize);

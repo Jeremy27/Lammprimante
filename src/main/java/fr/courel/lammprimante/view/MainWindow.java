@@ -62,10 +62,10 @@ public class MainWindow extends LammFrame {
             return service != null ? service.getName() : "—";
         }
     }
-    private final LammSpinner batchSizeSpinner = new LammSpinner("Pages par lot", 15, 1, 100, 1);
+    private final LammSpinner batchSizeSpinner = new LammSpinner("Pages par lot", 20, 1, 100, 1);
     private final LammSpinner copiesSpinner = new LammSpinner("Copies", 1, 1, 99, 1);
     private final LammComboBox<String> rectoVersoCombo = new LammComboBox<>("Recto/Verso",
-            "Recto seul", "Recto/Verso (bord long)", "Recto/Verso (bord court)");
+            "Recto seul", "Recto/Verso — Livre", "Recto/Verso — Bloc-notes");
     private final LammComboBox<String> pagesPerSheetCombo = new LammComboBox<>("Pages par feuille",
             "1", "2", "4");
     private final LammComboBox<String> orientationCombo = new LammComboBox<>("Orientation",
