@@ -2,6 +2,7 @@ package fr.courel.lammprimante.service;
 
 import fr.courel.lammprimante.model.PrintSettings;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.multipdf.Splitter;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -11,11 +12,11 @@ import org.apache.pdfbox.printing.PDFPageable;
 
 import javax.imageio.ImageIO;
 import javax.print.attribute.HashPrintRequestAttributeSet;
-import javax.print.attribute.standard.PageRanges;
 import java.awt.image.BufferedImage;
 import java.awt.print.PrinterException;
 import java.awt.print.PrinterJob;
 import java.io.File;
+import java.util.List;
 import java.util.function.Consumer;
 
 public class PrintService {
@@ -76,14 +77,27 @@ public class PrintService {
                     }
                     int toPage = Math.min(fromPage + batchSize, totalPages);
 
-                    String jobName = pdfFile.getName() + " - lot " + (batch + 1) + "/" + totalBatches;
-                    HashPrintRequestAttributeSet attrs = new HashPrintRequestAttributeSet(settings.toAttributes());
-                    attrs.add(new PageRanges(fromPage + 1, toPage));
-
+                    // On extrait un sous-document contenant uniquement les pages du lot
+                    // plutôt que d'envoyer le document entier avec PageRanges : certains
+                    // drivers ignorent PageRanges via Pageable et sortent des pages blanches.
+                    Splitter splitter = new Splitter();
+                    splitter.setStartPage(fromPage + 1);
+                    splitter.setEndPage(toPage);
+                    splitter.setSplitAtPage(toPage - fromPage);
+                    List<PDDocument> parts = splitter.split(document);
                     try {
-                        printWithRetry(printer, document, jobName, attrs, pdfFile.getName(), batch + 1, totalBatches);
-                    } catch (PrinterException ex) {
-                        throw new PartialPrintException(fromPage, ex);
+                        PDDocument batchDoc = parts.get(0);
+                        String jobName = pdfFile.getName() + " - lot " + (batch + 1) + "/" + totalBatches;
+                        try {
+                            printWithRetry(printer, batchDoc, jobName, settings.toAttributes(),
+                                    pdfFile.getName(), batch + 1, totalBatches);
+                        } catch (PrinterException ex) {
+                            throw new PartialPrintException(fromPage, ex);
+                        }
+                    } finally {
+                        for (PDDocument part : parts) {
+                            part.close();
+                        }
                     }
 
                     onProgress.accept(new PrintProgress(
