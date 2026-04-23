@@ -2,6 +2,7 @@ package fr.courel.lammprimante;
 
 import fr.courel.lammprimante.config.ThemeManager;
 import fr.courel.lammprimante.service.LogService;
+import fr.courel.lammprimante.service.UpdateService;
 import fr.courel.lammprimante.view.MainWindow;
 
 import javax.swing.*;
@@ -22,5 +23,6 @@ public class App {
             ThemeManager.applySaved();
             new MainWindow().setVisible(true);
         });
+        UpdateService.checkForUpdatesAsync();
     }
 }
