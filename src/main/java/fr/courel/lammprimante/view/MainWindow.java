@@ -36,6 +36,8 @@ import java.awt.dnd.DnDConstants;
 import java.awt.dnd.DropTarget;
 import java.awt.dnd.DropTargetAdapter;
 import java.awt.dnd.DropTargetDropEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -47,6 +49,7 @@ import java.util.Set;
 
 public class MainWindow extends LammFrame {
 
+    private final Rectangle lastNormalBounds = new Rectangle();
     private final FileImportService fileImportService = new FileImportService();
 
     private final DefaultMutableTreeNode treeRoot = new DefaultMutableTreeNode("Fichiers");
@@ -89,10 +92,21 @@ public class MainWindow extends LammFrame {
         applySavedBounds();
         loadIcon();
 
+        ComponentAdapter boundsTracker = new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) { captureNormalBounds(); }
+            @Override
+            public void componentMoved(ComponentEvent e) { captureNormalBounds(); }
+        };
+        addComponentListener(boundsTracker);
+
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosing(java.awt.event.WindowEvent e) {
-                PreferencesManager.setWindowBounds(getX(), getY(), getWidth(), getHeight());
+                boolean maximized = (getExtendedState() & Frame.MAXIMIZED_BOTH) == Frame.MAXIMIZED_BOTH;
+                PreferencesManager.setWindowBounds(lastNormalBounds.x, lastNormalBounds.y,
+                        lastNormalBounds.width, lastNormalBounds.height);
+                PreferencesManager.setWindowMaximized(maximized);
                 fileImportService.cleanup();
             }
         });
@@ -147,6 +161,17 @@ public class MainWindow extends LammFrame {
             setLocation(x, y);
         } else {
             setLocationRelativeTo(null);
+        }
+        lastNormalBounds.setBounds(getX(), getY(), w, h);
+
+        if (PreferencesManager.getWindowMaximized()) {
+            setExtendedState(getExtendedState() | Frame.MAXIMIZED_BOTH);
+        }
+    }
+
+    private void captureNormalBounds() {
+        if (getExtendedState() == Frame.NORMAL && getWidth() > 0 && getHeight() > 0) {
+            lastNormalBounds.setBounds(getX(), getY(), getWidth(), getHeight());
         }
     }
 

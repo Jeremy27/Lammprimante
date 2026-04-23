@@ -67,11 +67,16 @@ public class PreferencesManager {
     public static int getWindowY() { return PREFS.getInt("windowY", -1); }
     public static int getWindowWidth() { return PREFS.getInt("windowWidth", 750); }
     public static int getWindowHeight() { return PREFS.getInt("windowHeight", 600); }
+    public static boolean getWindowMaximized() { return PREFS.getBoolean("windowMaximized", false); }
 
     public static void setWindowBounds(int x, int y, int width, int height) {
         PREFS.putInt("windowX", x);
         PREFS.putInt("windowY", y);
         PREFS.putInt("windowWidth", width);
         PREFS.putInt("windowHeight", height);
+    }
+
+    public static void setWindowMaximized(boolean maximized) {
+        PREFS.putBoolean("windowMaximized", maximized);
     }
 }
