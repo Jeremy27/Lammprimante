@@ -1,9 +1,20 @@
 package fr.courel.lammprimante.service;
 
 import fr.courel.lammprimante.App;
+import fr.courel.lammui.component.LammDialog;
+import fr.courel.lammui.component.LammLabel;
+import fr.courel.lammui.component.LammProgressBar;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JDialog;
+import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
+import java.awt.BorderLayout;
+import java.awt.Dimension;
+import java.awt.Frame;
+import java.awt.Window;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.InputStream;
@@ -18,7 +29,10 @@ public class UpdateService {
     private static final String GITHUB_API = "https://api.github.com/repos/Jeremy27/Lammprimante/releases/latest";
     private static final int TIMEOUT = 5000;
 
-    public static void checkForUpdatesAsync() {
+    private static Window parentWindow;
+
+    public static void checkForUpdatesAsync(Window parent) {
+        parentWindow = parent;
         if (!isWindows()) return;
         Thread t = new Thread(UpdateService::checkForUpdates, "update-check");
         t.setDaemon(true);
@@ -44,28 +58,18 @@ public class UpdateService {
     }
 
     private static void promptUpdate(ReleaseInfo release, String local) {
-        int choice = JOptionPane.showConfirmDialog(null,
-                "Nouvelle version disponible : " + release.tag + "\n"
-                        + "(version actuelle : " + local + ")\n\n"
-                        + "Mettre à jour maintenant ?",
-                "Lammprimante - Mise à jour",
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.INFORMATION_MESSAGE);
-
-        if (choice != JOptionPane.YES_OPTION) return;
+        boolean confirmed = LammDialog.confirm(parentWindow,
+                "Mise à jour disponible",
+                "Une nouvelle version " + release.tag + " est disponible "
+                        + "(version actuelle : " + local + ").\n\n"
+                        + "Voulez-vous l'installer maintenant ?");
+        if (!confirmed) return;
 
         new Thread(() -> downloadAndInstall(release), "update-download").start();
     }
 
     private static void downloadAndInstall(ReleaseInfo release) {
-        JDialog dialog = new JDialog((Frame) null, "Mise à jour", false);
-        JProgressBar bar = new JProgressBar();
-        bar.setIndeterminate(true);
-        bar.setString("Téléchargement en cours...");
-        bar.setStringPainted(true);
-        dialog.add(bar);
-        dialog.setSize(350, 80);
-        dialog.setLocationRelativeTo(null);
+        JDialog dialog = buildDownloadDialog(release);
         SwingUtilities.invokeLater(() -> dialog.setVisible(true));
 
         try {
@@ -88,12 +92,42 @@ public class UpdateService {
             System.exit(0);
         } catch (Exception ex) {
             LogService.error("Échec de la mise à jour", ex);
-            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(null,
-                    "Échec de la mise à jour :\n" + ex.getMessage(),
-                    "Erreur", JOptionPane.ERROR_MESSAGE));
-        } finally {
-            SwingUtilities.invokeLater(dialog::dispose);
+            SwingUtilities.invokeLater(() -> {
+                dialog.dispose();
+                LammDialog.error(parentWindow,
+                        "Mise à jour impossible",
+                        "Le téléchargement a échoué :\n" + ex.getMessage());
+            });
         }
+    }
+
+    private static JDialog buildDownloadDialog(ReleaseInfo release) {
+        JDialog dialog = new JDialog((Frame) parentWindow, "Mise à jour", false);
+
+        LammLabel title = new LammLabel("Mise à jour en cours", LammLabel.Style.TITLE);
+        LammLabel subtitle = new LammLabel("Téléchargement de la version " + release.tag + "…",
+                LammLabel.Style.BODY, true);
+
+        LammProgressBar bar = new LammProgressBar();
+        bar.setIndeterminate(true);
+
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBorder(BorderFactory.createEmptyBorder(24, 28, 24, 28));
+        content.add(title);
+        content.add(Box.createVerticalStrut(6));
+        content.add(subtitle);
+        content.add(Box.createVerticalStrut(18));
+        content.add(bar);
+
+        dialog.setContentPane(new JPanel(new BorderLayout()));
+        dialog.getContentPane().add(content, BorderLayout.CENTER);
+        dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+        dialog.pack();
+        dialog.setMinimumSize(new Dimension(420, dialog.getHeight()));
+        dialog.setSize(dialog.getMinimumSize());
+        dialog.setLocationRelativeTo(parentWindow);
+        return dialog;
     }
 
     private static ReleaseInfo fetchLatestRelease() throws Exception {

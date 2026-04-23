@@ -21,8 +21,9 @@ public class App {
         LogService.info("Démarrage de Lammprimante v" + getVersion());
         SwingUtilities.invokeLater(() -> {
             ThemeManager.applySaved();
-            new MainWindow().setVisible(true);
+            MainWindow window = new MainWindow();
+            window.setVisible(true);
+            UpdateService.checkForUpdatesAsync(window);
         });
-        UpdateService.checkForUpdatesAsync();
     }
 }
