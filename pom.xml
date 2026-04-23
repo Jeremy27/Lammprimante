@@ -6,7 +6,7 @@
 
     <groupId>fr.courel</groupId>
     <artifactId>lammprimante</artifactId>
-    <version>1.5.2</version>
+    <version>1.5.3</version>
     <packaging>jar</packaging>
 
     <properties>
