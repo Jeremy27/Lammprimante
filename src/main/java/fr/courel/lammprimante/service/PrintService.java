@@ -50,13 +50,22 @@ public class PrintService {
 
     private void printPdf(File pdfFile, javax.print.PrintService printer, PrintSettings settings,
                           int startPage, Consumer<PrintProgress> onProgress) throws Exception {
+        long fileStart = System.nanoTime();
+        long loadStart = System.nanoTime();
         try (PDDocument loaded = Loader.loadPDF(pdfFile)) {
+            long loadMs = (System.nanoTime() - loadStart) / 1_000_000;
+            LogService.info(String.format("[%s] loadPDF=%dms (taille=%dKo)",
+                    pdfFile.getName(), loadMs, pdfFile.length() / 1024));
+
             PDDocument document = loaded;
             PDDocument composed = null;
             try {
                 if (settings.pagesPerSheet() > 1) {
+                    long nupStart = System.nanoTime();
                     composed = new NUpService().compose(loaded, settings.pagesPerSheet());
                     document = composed;
+                    LogService.info(String.format("[%s] N-up compose=%dms",
+                            pdfFile.getName(), (System.nanoTime() - nupStart) / 1_000_000));
                 }
 
                 int totalPages = document.getNumberOfPages();
@@ -70,33 +79,56 @@ public class PrintService {
                 int remainingPages = totalPages - clampedStart;
                 int totalBatches = remainingPages == 0 ? 0 : (int) Math.ceil((double) remainingPages / batchSize);
 
+                long totalSplitMs = 0;
+                long totalPrintMs = 0;
+
                 int fromPage = clampedStart;
                 for (int batch = 0; batch < totalBatches; batch++) {
                     if (Thread.currentThread().isInterrupted()) {
                         throw new InterruptedException("Impression annulée");
                     }
                     int toPage = Math.min(fromPage + batchSize, totalPages);
+                    boolean wholeDoc = (totalBatches == 1 && fromPage == 0);
 
-                    // On extrait un sous-document contenant uniquement les pages du lot
-                    // plutôt que d'envoyer le document entier avec PageRanges : certains
-                    // drivers ignorent PageRanges via Pageable et sortent des pages blanches.
-                    Splitter splitter = new Splitter();
-                    splitter.setStartPage(fromPage + 1);
-                    splitter.setEndPage(toPage);
-                    splitter.setSplitAtPage(toPage - fromPage);
-                    List<PDDocument> parts = splitter.split(document);
+                    // Cas wholeDoc : on imprime `document` directement (économise une
+                    // copie complète via Splitter, qui copie toutes les ressources du
+                    // PDF — coûteux pour les fichiers riches en images).
+                    // Sinon : on extrait un sous-document avec uniquement les pages du
+                    // lot (PageRanges via Pageable est ignoré par certains drivers).
+                    long splitStart = System.nanoTime();
+                    PDDocument batchDoc;
+                    List<PDDocument> parts = null;
+                    if (wholeDoc) {
+                        batchDoc = document;
+                    } else {
+                        Splitter splitter = new Splitter();
+                        splitter.setStartPage(fromPage + 1);
+                        splitter.setEndPage(toPage);
+                        splitter.setSplitAtPage(toPage - fromPage);
+                        parts = splitter.split(document);
+                        batchDoc = parts.get(0);
+                    }
+                    long splitMs = (System.nanoTime() - splitStart) / 1_000_000;
+                    totalSplitMs += splitMs;
                     try {
-                        PDDocument batchDoc = parts.get(0);
                         String jobName = pdfFile.getName() + " - lot " + (batch + 1) + "/" + totalBatches;
+                        long printStart = System.nanoTime();
                         try {
                             printWithRetry(printer, batchDoc, jobName, settings.toAttributes(),
                                     pdfFile.getName(), batch + 1, totalBatches);
                         } catch (PrinterException ex) {
                             throw new PartialPrintException(fromPage, ex);
                         }
+                        long printMs = (System.nanoTime() - printStart) / 1_000_000;
+                        totalPrintMs += printMs;
+                        LogService.info(String.format("[%s] Lot %d/%d : split=%dms%s, print=%dms",
+                                pdfFile.getName(), batch + 1, totalBatches, splitMs,
+                                wholeDoc ? " (skip)" : "", printMs));
                     } finally {
-                        for (PDDocument part : parts) {
-                            part.close();
+                        if (parts != null) {
+                            for (PDDocument part : parts) {
+                                part.close();
+                            }
                         }
                     }
 
@@ -105,12 +137,25 @@ public class PrintService {
 
                     fromPage = toPage;
                 }
+
+                long closeStart = System.nanoTime();
+                if (composed != null) {
+                    composed.close();
+                    composed = null;
+                }
+                long composedCloseMs = (System.nanoTime() - closeStart) / 1_000_000;
+                LogService.info(String.format(
+                        "[%s] récap : load=%dms, splits=%dms, prints=%dms, composed-close=%dms, total=%dms",
+                        pdfFile.getName(), loadMs, totalSplitMs, totalPrintMs, composedCloseMs,
+                        (System.nanoTime() - fileStart) / 1_000_000));
             } finally {
                 if (composed != null) {
                     composed.close();
                 }
             }
         }
+        LogService.info(String.format("[%s] loaded.close inclus ; total fichier (avec close)=%dms",
+                pdfFile.getName(), (System.nanoTime() - fileStart) / 1_000_000));
     }
 
     private void printWithRetry(javax.print.PrintService printer, PDDocument document, String jobName,
@@ -151,12 +196,16 @@ public class PrintService {
 
     private void printImage(File imageFile, javax.print.PrintService printer, PrintSettings settings,
                             Consumer<PrintProgress> onProgress) throws Exception {
+        long fileStart = System.nanoTime();
+        long decodeStart = System.nanoTime();
         BufferedImage img = ImageIO.read(imageFile);
         if (img == null) {
             throw new Exception("Impossible de lire l'image");
         }
+        long decodeMs = (System.nanoTime() - decodeStart) / 1_000_000;
 
         try (PDDocument doc = new PDDocument()) {
+            long renderStart = System.nanoTime();
             PDPage page = new PDPage(PDRectangle.A4);
             doc.addPage(page);
 
@@ -180,14 +229,22 @@ public class PrintService {
             try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
                 cs.drawImage(pdImage, x, y, drawWidth, drawHeight);
             }
+            long renderMs = (System.nanoTime() - renderStart) / 1_000_000;
 
             onProgress.accept(new PrintProgress(imageFile.getName(), 1, 1, 1, 1));
 
+            long printStart = System.nanoTime();
             PrinterJob job = PrinterJob.getPrinterJob();
             job.setPrintService(printer);
             job.setPageable(new PDFPageable(doc));
             job.setJobName(imageFile.getName());
             job.print(settings.toAttributes());
+            long printMs = (System.nanoTime() - printStart) / 1_000_000;
+
+            LogService.info(String.format(
+                    "[%s] image : decode=%dms, render=%dms, print=%dms, total=%dms",
+                    imageFile.getName(), decodeMs, renderMs, printMs,
+                    (System.nanoTime() - fileStart) / 1_000_000));
         }
     }
 }
