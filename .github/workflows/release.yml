@@ -6,85 +6,10 @@ on:
       - 'v*'
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            profile: dist-linux
-            artifact-glob: target/*.deb
-            artifact-name: lammprimante-linux
-          - os: windows-latest
-            profile: dist-win
-            artifact-glob: target/*.msi
-            artifact-name: lammprimante-windows
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 25
-        uses: actions/setup-java@v4
-        with:
-          java-version: '25'
-          distribution: 'temurin'
-          server-id: github-lammui
-          server-username: MAVEN_USERNAME
-          server-password: MAVEN_PASSWORD
-
-      - name: Install fakeroot (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y fakeroot
-
-      - name: Install WiX (Windows)
-        if: runner.os == 'Windows'
-        run: choco install wixtoolset -y --no-progress
-
-      - name: Verify pom version matches tag
-        shell: bash
-        run: |
-          POM_VERSION=$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$POM_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::Version pom ($POM_VERSION) != tag ($TAG_VERSION)"
-            exit 1
-          fi
-
-      - name: Build installer
-        run: mvn --batch-mode -P${{ matrix.profile }} clean package
-        env:
-          MAVEN_USERNAME: ${{ github.actor }}
-          MAVEN_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact-name }}
-          path: ${{ matrix.artifact-glob }}
-
   release:
-    needs: build
-    runs-on: ubuntu-latest
+    uses: Jeremy27/LammCI/.github/workflows/app-release.yml@main
+    with:
+      app-name: Lammprimante
     permissions:
       contents: write
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          VERSION="${TAG#v}"
-          gh release create "$TAG" artifacts/* \
-            --repo "$REPO" \
-            --title "Lammprimante $VERSION" \
-            --generate-notes
+      packages: read
