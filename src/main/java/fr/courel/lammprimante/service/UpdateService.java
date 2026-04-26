@@ -1,20 +1,19 @@
 package fr.courel.lammprimante.service;
 
 import fr.courel.lammprimante.App;
-import fr.courel.lammui.component.LammDialog;
-import fr.courel.lammui.component.LammLabel;
-import fr.courel.lammui.component.LammProgressBar;
+import fr.courel.lammui.fx.component.LammProgressBarFx;
+import fr.courel.lammui.fx.theme.LammThemeFx;
+import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.Label;
+import javafx.scene.layout.VBox;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 
-import javax.swing.BorderFactory;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
-import javax.swing.JDialog;
-import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
-import java.awt.BorderLayout;
-import java.awt.Dimension;
-import java.awt.Frame;
-import java.awt.Window;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.InputStream;
@@ -29,10 +28,10 @@ public class UpdateService {
     private static final String GITHUB_API = "https://api.github.com/repos/Jeremy27/Lammprimante/releases/latest";
     private static final int TIMEOUT = 5000;
 
-    private static Window parentWindow;
+    private static Stage parentStage;
 
-    public static void checkForUpdatesAsync(Window parent) {
-        parentWindow = parent;
+    public static void checkForUpdatesAsync(Stage parent) {
+        parentStage = parent;
         if (!isWindows()) return;
         Thread t = new Thread(UpdateService::checkForUpdates, "update-check");
         t.setDaemon(true);
@@ -51,26 +50,37 @@ public class UpdateService {
             String local = App.getVersion();
             if ("inconnue".equals(local) || !isNewer(release.tag, local)) return;
 
-            SwingUtilities.invokeLater(() -> promptUpdate(release, local));
+            Platform.runLater(() -> promptUpdate(release, local));
         } catch (Exception e) {
             LogService.warn("Vérification des mises à jour échouée : " + e.getMessage());
         }
     }
 
     private static void promptUpdate(ReleaseInfo release, String local) {
-        boolean confirmed = LammDialog.confirm(parentWindow,
-                "Mise à jour disponible",
-                "Une nouvelle version " + release.tag + " est disponible "
-                        + "(version actuelle : " + local + ").\n\n"
-                        + "Voulez-vous l'installer maintenant ?");
-        if (!confirmed) return;
+        var alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Mise à jour disponible");
+        alert.setHeaderText("Mise à jour disponible");
+        alert.setContentText("Une nouvelle version " + release.tag + " est disponible "
+            + "(version actuelle : " + local + ").\n\n"
+            + "Voulez-vous l'installer maintenant ?");
+        alert.initOwner(parentStage);
+        if (parentStage != null && parentStage.getUserData() instanceof App app) {
+            app.styleDialog(alert);
+        } else {
+            tryStyleDialogFromStage(alert);
+        }
+        var result = alert.showAndWait();
+        if (result.isEmpty() || result.get() != ButtonType.OK) return;
 
         new Thread(() -> downloadAndInstall(release), "update-download").start();
     }
 
     private static void downloadAndInstall(ReleaseInfo release) {
-        JDialog dialog = buildDownloadDialog(release);
-        SwingUtilities.invokeLater(() -> dialog.setVisible(true));
+        Stage[] dialogHolder = new Stage[1];
+        Platform.runLater(() -> {
+            dialogHolder[0] = buildDownloadStage(release);
+            dialogHolder[0].show();
+        });
 
         try {
             Path msi = Files.createTempFile("lammprimante-", ".msi");
@@ -92,42 +102,64 @@ public class UpdateService {
             System.exit(0);
         } catch (Exception ex) {
             LogService.error("Échec de la mise à jour", ex);
-            SwingUtilities.invokeLater(() -> {
-                dialog.dispose();
-                LammDialog.error(parentWindow,
-                        "Mise à jour impossible",
-                        "Le téléchargement a échoué :\n" + ex.getMessage());
+            Platform.runLater(() -> {
+                if (dialogHolder[0] != null) dialogHolder[0].close();
+                var alert = new Alert(Alert.AlertType.ERROR);
+                alert.setTitle("Mise à jour impossible");
+                alert.setHeaderText("Mise à jour impossible");
+                alert.setContentText("Le téléchargement a échoué :\n" + ex.getMessage());
+                alert.initOwner(parentStage);
+                tryStyleDialogFromStage(alert);
+                alert.showAndWait();
             });
         }
     }
 
-    private static JDialog buildDownloadDialog(ReleaseInfo release) {
-        JDialog dialog = new JDialog((Frame) parentWindow, "Mise à jour", false);
+    private static Stage buildDownloadStage(ReleaseInfo release) {
+        var title = new Label("Mise à jour en cours");
+        title.getStyleClass().add("lamm-title");
+        var subtitle = new Label("Téléchargement de la version " + release.tag + "…");
+        subtitle.getStyleClass().add("lamm-subtitle");
+        var progress = new LammProgressBarFx();
+        progress.setProgress(-1);
+        progress.setMaxWidth(Double.MAX_VALUE);
 
-        LammLabel title = new LammLabel("Mise à jour en cours", LammLabel.Style.TITLE);
-        LammLabel subtitle = new LammLabel("Téléchargement de la version " + release.tag + "…",
-                LammLabel.Style.BODY, true);
+        var content = new VBox(12, title, subtitle, progress);
+        content.setPadding(new Insets(24, 28, 24, 28));
 
-        LammProgressBar bar = new LammProgressBar();
-        bar.setIndeterminate(true);
+        var stage = new Stage();
+        stage.initOwner(parentStage);
+        stage.initModality(Modality.WINDOW_MODAL);
+        stage.initStyle(StageStyle.UNDECORATED);
+        stage.setTitle("Mise à jour");
+        var scene = new Scene(content, 420, 160);
+        LammThemeFx.install(scene);
+        if (parentStage != null && parentStage.getScene() != null) {
+            scene.getStylesheets().setAll(parentStage.getScene().getStylesheets());
+            for (var cls : parentStage.getScene().getRoot().getStyleClass()) {
+                if ("dark".equals(cls) || cls.startsWith("accent-")) {
+                    if (!scene.getRoot().getStyleClass().contains(cls)) {
+                        scene.getRoot().getStyleClass().add(cls);
+                    }
+                }
+            }
+        }
+        stage.setScene(scene);
+        return stage;
+    }
 
-        JPanel content = new JPanel();
-        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        content.setBorder(BorderFactory.createEmptyBorder(24, 28, 24, 28));
-        content.add(title);
-        content.add(Box.createVerticalStrut(6));
-        content.add(subtitle);
-        content.add(Box.createVerticalStrut(18));
-        content.add(bar);
-
-        dialog.setContentPane(new JPanel(new BorderLayout()));
-        dialog.getContentPane().add(content, BorderLayout.CENTER);
-        dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
-        dialog.pack();
-        dialog.setMinimumSize(new Dimension(420, dialog.getHeight()));
-        dialog.setSize(dialog.getMinimumSize());
-        dialog.setLocationRelativeTo(parentWindow);
-        return dialog;
+    private static void tryStyleDialogFromStage(javafx.scene.control.Dialog<?> dialog) {
+        if (parentStage == null || parentStage.getScene() == null) return;
+        var pane = dialog.getDialogPane();
+        pane.setGraphic(null);
+        pane.getStylesheets().setAll(parentStage.getScene().getStylesheets());
+        for (var cls : parentStage.getScene().getRoot().getStyleClass()) {
+            if ("dark".equals(cls) || cls.startsWith("accent-")) {
+                if (!pane.getStyleClass().contains(cls)) {
+                    pane.getStyleClass().add(cls);
+                }
+            }
+        }
     }
 
     private static ReleaseInfo fetchLatestRelease() throws Exception {

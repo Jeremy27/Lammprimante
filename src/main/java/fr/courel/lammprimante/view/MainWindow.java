@@ -2,42 +2,36 @@ package fr.courel.lammprimante.view;
 
 import fr.courel.lammprimante.App;
 import fr.courel.lammprimante.config.PreferencesManager;
-import fr.courel.lammprimante.config.ThemeManager;
 import fr.courel.lammprimante.model.PrintSettings;
 import fr.courel.lammprimante.service.FileImportService;
 import fr.courel.lammprimante.service.LogService;
 import fr.courel.lammprimante.service.PrintService;
-import fr.courel.lammui.component.LammButton;
-import fr.courel.lammui.component.LammCard;
-import fr.courel.lammui.component.LammComboBox;
-import fr.courel.lammui.component.LammDialog;
-import fr.courel.lammui.component.LammFrame;
-import fr.courel.lammui.component.LammHeader;
-import fr.courel.lammui.component.LammLabel;
-import fr.courel.lammui.component.LammProgressBar;
-import fr.courel.lammui.component.LammScrollPane;
-import fr.courel.lammui.component.LammSpinner;
-import fr.courel.lammui.component.LammSwitch;
-import fr.courel.lammui.component.LammWindowControls;
-import fr.courel.lammui.component.LammTextArea;
-import fr.courel.lammui.component.LammTitle;
-import fr.courel.lammui.component.LammTree;
-import fr.courel.lammui.theme.LammTheme;
+import fr.courel.lammui.fx.component.LammButtonFx;
+import fr.courel.lammui.fx.component.LammCardFx;
+import fr.courel.lammui.fx.component.LammProgressBarFx;
+import fr.courel.lammui.fx.component.LammSpinnerFx;
+import fr.courel.lammui.fx.component.LammTreeFx;
+import javafx.application.Platform;
+import javafx.collections.FXCollections;
+import javafx.concurrent.Task;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.TreeItem;
+import javafx.scene.input.TransferMode;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
 
-import javax.imageio.ImageIO;
 import javax.print.PrintServiceLookup;
-import javax.swing.*;
-import javax.swing.filechooser.FileNameExtensionFilter;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeModel;
-import java.awt.*;
-import java.awt.datatransfer.DataFlavor;
-import java.awt.dnd.DnDConstants;
-import java.awt.dnd.DropTarget;
-import java.awt.dnd.DropTargetAdapter;
-import java.awt.dnd.DropTargetDropEvent;
-import java.awt.event.ComponentAdapter;
-import java.awt.event.ComponentEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -47,18 +41,33 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class MainWindow extends LammFrame {
+public class MainWindow extends VBox {
 
-    private final Rectangle lastNormalBounds = new Rectangle();
+    private final App app;
     private final FileImportService fileImportService = new FileImportService();
-
-    private final DefaultMutableTreeNode treeRoot = new DefaultMutableTreeNode("Fichiers");
-    private final DefaultTreeModel treeModel = new DefaultTreeModel(treeRoot);
-    private final LammTree fileTree = new LammTree(treeModel);
     private final List<File> allFiles = new ArrayList<>();
     private final Map<File, Integer> resumePages = new HashMap<>();
 
-    private final LammComboBox<PrinterItem> printerCombo;
+    private final TreeItem<String> treeRoot = new TreeItem<>("Fichiers");
+    private final LammTreeFx<String> fileTree = new LammTreeFx<>(treeRoot);
+
+    private final ComboBox<PrinterItem> printerCombo;
+    private final LammSpinnerFx batchSizeSpinner;
+    private final LammSpinnerFx copiesSpinner;
+    private final ComboBox<String> rectoVersoCombo;
+    private final ComboBox<String> pagesPerSheetCombo;
+    private final ComboBox<String> orientationCombo;
+    private final ComboBox<String> colorCombo;
+
+    private final TextArea logArea = new TextArea();
+    private final LammButtonFx printButton = LammButtonFx.accent("Imprimer");
+    private final LammButtonFx cancelButton = new LammButtonFx("Annuler");
+    private final LammButtonFx addButton = new LammButtonFx("Ajouter des fichiers…");
+    private final LammButtonFx removeButton = new LammButtonFx("Retirer");
+    private final LammProgressBarFx progressBar = new LammProgressBarFx(0);
+    private final Label progressLabel = new Label();
+
+    private Task<Void> currentTask;
 
     private record PrinterItem(javax.print.PrintService service) {
         @Override
@@ -66,408 +75,190 @@ public class MainWindow extends LammFrame {
             return service != null ? service.getName() : "—";
         }
     }
-    private final LammSpinner batchSizeSpinner = new LammSpinner("Pages par lot", 20, 1, 100, 1);
-    private final LammSpinner copiesSpinner = new LammSpinner("Copies", 1, 1, 99, 1);
-    private final LammComboBox<String> rectoVersoCombo = new LammComboBox<>("Recto/Verso",
-            "Recto seul", "Recto/Verso — Livre", "Recto/Verso — Bloc-notes");
-    private final LammComboBox<String> pagesPerSheetCombo = new LammComboBox<>("Pages par feuille",
-            "1", "2", "4");
-    private final LammComboBox<String> orientationCombo = new LammComboBox<>("Orientation",
-            "Portrait", "Paysage");
-    private final LammComboBox<String> colorCombo = new LammComboBox<>("Couleur",
-            "Couleur", "Noir et blanc");
 
-    private final LammTextArea logArea = new LammTextArea("Journal", 6, 40);
-    private final LammButton printButton = new LammButton("Imprimer");
-    private final LammButton cancelButton = LammButton.flat("Annuler");
-    private final LammButton addButton = LammButton.flat("Ajouter des fichiers…");
-    private final LammButton removeButton = LammButton.flat("Retirer");
-    private final LammProgressBar progressBar = new LammProgressBar();
-    private SwingWorker<Void, String> currentWorker;
-
-    public MainWindow() {
-        super("Lammprimante v" + App.getVersion());
-        useCustomTitleBar();
-        setMinimumSize(new Dimension(700, 600));
-        applySavedBounds();
-        loadIcon();
-
-        ComponentAdapter boundsTracker = new ComponentAdapter() {
-            @Override
-            public void componentResized(ComponentEvent e) { captureNormalBounds(); }
-            @Override
-            public void componentMoved(ComponentEvent e) { captureNormalBounds(); }
-        };
-        addComponentListener(boundsTracker);
-
-        addWindowListener(new java.awt.event.WindowAdapter() {
-            @Override
-            public void windowClosing(java.awt.event.WindowEvent e) {
-                boolean maximized = (getExtendedState() & Frame.MAXIMIZED_BOTH) == Frame.MAXIMIZED_BOTH;
-                PreferencesManager.setWindowBounds(lastNormalBounds.x, lastNormalBounds.y,
-                        lastNormalBounds.width, lastNormalBounds.height);
-                PreferencesManager.setWindowMaximized(maximized);
-                fileImportService.cleanup();
-            }
-        });
+    public MainWindow(App app) {
+        this.app = app;
 
         printerCombo = buildPrinterCombo();
-        progressBar.setStringPainted(true);
+        batchSizeSpinner = new LammSpinnerFx("Pages par lot", 1, 100, PreferencesManager.getBatchSize());
+        copiesSpinner = new LammSpinnerFx("Copies", 1, 99, 1);
+        rectoVersoCombo = new ComboBox<>(FXCollections.observableArrayList(
+            "Recto seul", "Recto/Verso — Livre", "Recto/Verso — Bloc-notes"));
+        rectoVersoCombo.getSelectionModel().select(PreferencesManager.getDuplex());
+        pagesPerSheetCombo = new ComboBox<>(FXCollections.observableArrayList("1", "2", "4"));
+        pagesPerSheetCombo.getSelectionModel().selectFirst();
+        orientationCombo = new ComboBox<>(FXCollections.observableArrayList("Portrait", "Paysage"));
+        orientationCombo.getSelectionModel().select(PreferencesManager.getOrientation());
+        colorCombo = new ComboBox<>(FXCollections.observableArrayList("Couleur", "Noir et blanc"));
+        colorCombo.getSelectionModel().select(PreferencesManager.getColor());
 
-        batchSizeSpinner.setValue(PreferencesManager.getBatchSize());
-        rectoVersoCombo.getCombo().setSelectedIndex(PreferencesManager.getDuplex());
-        orientationCombo.getCombo().setSelectedIndex(PreferencesManager.getOrientation());
-        colorCombo.getCombo().setSelectedIndex(PreferencesManager.getColor());
+        wirePreferenceListeners();
 
-        batchSizeSpinner.getSpinner().addChangeListener(_ ->
-                PreferencesManager.setBatchSize(batchSizeSpinner.getValue()));
-        rectoVersoCombo.getCombo().addActionListener(_ ->
-                PreferencesManager.setDuplex(rectoVersoCombo.getCombo().getSelectedIndex()));
-        orientationCombo.getCombo().addActionListener(_ ->
-                PreferencesManager.setOrientation(orientationCombo.getCombo().getSelectedIndex()));
-        colorCombo.getCombo().addActionListener(_ ->
-                PreferencesManager.setColor(colorCombo.getCombo().getSelectedIndex()));
+        treeRoot.setExpanded(true);
+        fileTree.setShowRoot(false);
+        fileTree.getSelectionModel().setSelectionMode(javafx.scene.control.SelectionMode.MULTIPLE);
 
-        fileTree.setRootVisible(false);
-        fileTree.setShowsRootHandles(true);
         logArea.setEditable(false);
+        logArea.setPrefRowCount(6);
 
-        setLayout(new BorderLayout());
-        var header = buildHeader();
-        makeDraggable(header);
-        add(header, BorderLayout.NORTH);
-        add(new LammScrollPane(buildContent()), BorderLayout.CENTER);
+        progressBar.setMaxWidth(Double.MAX_VALUE);
+        cancelButton.setDisable(true);
 
-        addButton.addActionListener(_ -> addFiles());
-        removeButton.addActionListener(_ -> removeSelected());
-        printButton.addActionListener(_ -> startPrinting());
-        cancelButton.addActionListener(_ -> cancelPrinting());
-        cancelButton.setEnabled(false);
+        addButton.setOnAction(e -> addFiles());
+        removeButton.setOnAction(e -> removeSelected());
+        printButton.setOnAction(e -> startPrinting());
+        cancelButton.setOnAction(e -> cancelPrinting());
+
+        installDragAndDrop();
+
+        setSpacing(12);
+        setPadding(new Insets(16, 20, 20, 20));
+        getChildren().addAll(buildSettingsCard(), buildFilesCard(), buildBottom());
+        VBox.setVgrow(getChildren().get(1), Priority.ALWAYS);
     }
 
-    private void applySavedBounds() {
-        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
-        int maxW = Math.max(700, screen.width - 80);
-        int maxH = Math.max(600, screen.height - 120);
-
-        int w = Math.min(Math.max(PreferencesManager.getWindowWidth(), 700), maxW);
-        int h = Math.min(Math.max(PreferencesManager.getWindowHeight(), 600), maxH);
-        setSize(w, h);
-
-        int x = PreferencesManager.getWindowX();
-        int y = PreferencesManager.getWindowY();
-        boolean onScreen = x >= 0 && y >= 0 && x + w <= screen.width && y + h <= screen.height;
-        if (onScreen) {
-            setLocation(x, y);
-        } else {
-            setLocationRelativeTo(null);
+    public void shutdown() {
+        if (currentTask != null && currentTask.isRunning()) {
+            currentTask.cancel();
         }
-        lastNormalBounds.setBounds(getX(), getY(), w, h);
+        fileImportService.cleanup();
+    }
 
-        if (PreferencesManager.getWindowMaximized()) {
-            setExtendedState(getExtendedState() | Frame.MAXIMIZED_BOTH);
+    /* ---------- Layout helpers ---------- */
+
+    private static VBox labeled(String label, Node field) {
+        var l = new Label(label);
+        l.getStyleClass().add("lamm-spinner-label");
+        var box = new VBox(2, l, field);
+        if (field instanceof Region r) {
+            r.setMaxWidth(Double.MAX_VALUE);
         }
+        return box;
     }
 
-    private void captureNormalBounds() {
-        if (getExtendedState() == Frame.NORMAL && getWidth() > 0 && getHeight() > 0) {
-            lastNormalBounds.setBounds(getX(), getY(), getWidth(), getHeight());
+    private LammCardFx buildSettingsCard() {
+        var card = new LammCardFx("Paramètres");
+        var grid = new GridPane();
+        grid.setHgap(12);
+        grid.setVgap(10);
+        for (int i = 0; i < 4; i++) {
+            var col = new javafx.scene.layout.ColumnConstraints();
+            col.setPercentWidth(25);
+            col.setHgrow(Priority.SOMETIMES);
+            grid.getColumnConstraints().add(col);
         }
+
+        grid.add(labeled("Imprimante", printerCombo), 0, 0, 2, 1);
+        grid.add(batchSizeSpinner, 2, 0);
+        grid.add(copiesSpinner, 3, 0);
+        grid.add(labeled("Recto/Verso", rectoVersoCombo), 0, 1);
+        grid.add(labeled("Orientation", orientationCombo), 1, 1);
+        grid.add(labeled("Couleur", colorCombo), 2, 1);
+        grid.add(labeled("Pages par feuille", pagesPerSheetCombo), 3, 1);
+
+        card.getChildren().add(grid);
+        return card;
     }
 
-    private JPanel buildHeader() {
-        var header = new LammHeader();
-        header.setBorder(BorderFactory.createEmptyBorder(6, 16, 6, 16));
+    private LammCardFx buildFilesCard() {
+        var card = new LammCardFx("Fichiers (glisser-déposer PDF, images, ZIP ou dossiers ici)");
+        var scroll = new ScrollPane(fileTree);
+        scroll.setFitToWidth(true);
+        scroll.setPrefHeight(180);
+        VBox.setVgrow(scroll, Priority.ALWAYS);
 
-        var titlePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        titlePanel.setOpaque(false);
-        titlePanel.add(new LammTitle("primante", 22f));
-        header.add(titlePanel, BorderLayout.WEST);
+        var buttons = new HBox(8, addButton, removeButton);
+        buttons.setAlignment(Pos.CENTER_LEFT);
 
-        var themeSwitch = new LammSwitch(LammTheme.isDark() ? "Light" : "Dark");
-        themeSwitch.setOnGradient(true);
-        themeSwitch.setSelected(LammTheme.isDark());
-        themeSwitch.addPropertyChangeListener("selected", _ -> {
-            LammTheme.toggle();
-            themeSwitch.setLabel(LammTheme.isDark() ? "Light" : "Dark");
-            ThemeManager.save(LammTheme.isDark());
-            LammTheme.repaintAll(this);
-        });
-        var eastPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        eastPanel.setOpaque(false);
-        eastPanel.add(themeSwitch);
-        eastPanel.add(new LammWindowControls(this));
-        header.add(eastPanel, BorderLayout.EAST);
-
-        return header;
+        card.getChildren().addAll(scroll, buttons);
+        VBox.setVgrow(card, Priority.ALWAYS);
+        return card;
     }
 
-    private JPanel buildContent() {
-        var content = new JPanel(new BorderLayout(12, 12));
-        content.setOpaque(false);
-        content.setBorder(BorderFactory.createEmptyBorder(16, 20, 20, 20));
+    private VBox buildBottom() {
+        var logsCard = new LammCardFx("Journal");
+        VBox.setVgrow(logArea, Priority.ALWAYS);
+        logsCard.getChildren().add(logArea);
 
-        content.add(buildSettingsCard(), BorderLayout.NORTH);
-        content.add(buildFilesCard(), BorderLayout.CENTER);
-        content.add(buildBottom(), BorderLayout.SOUTH);
+        HBox.setHgrow(progressBar, Priority.ALWAYS);
+        var actionRow = new HBox(12, progressBar, progressLabel, cancelButton, printButton);
+        actionRow.setAlignment(Pos.CENTER_LEFT);
+        progressLabel.setMinWidth(80);
 
-        return content;
+        var wrapper = new VBox(8, logsCard, actionRow);
+        return wrapper;
     }
 
-    private void loadIcon() {
-        try {
-            Image source = ImageIO.read(getClass().getResourceAsStream("/logo.jpg"));
-            int size = 64;
-            var icon = new java.awt.image.BufferedImage(size, size,
-                    java.awt.image.BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g2 = icon.createGraphics();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-            g2.setClip(new java.awt.geom.Ellipse2D.Float(0, 0, size, size));
-            int srcW = source.getWidth(null);
-            int srcH = source.getHeight(null);
-            int cropSize = Math.min(srcW, srcH);
-            int sx = (srcW - cropSize) / 2;
-            int sy = (srcH - cropSize) / 2;
-            g2.drawImage(source, 0, 0, size, size, sx, sy, sx + cropSize, sy + cropSize, null);
-            g2.dispose();
-            setIconImage(icon);
-        } catch (Exception ignored) {
-        }
-    }
+    /* ---------- Init helpers ---------- */
 
-    private LammComboBox<PrinterItem> buildPrinterCombo() {
+    private ComboBox<PrinterItem> buildPrinterCombo() {
         javax.print.PrintService[] printers = PrintServiceLookup.lookupPrintServices(null, null);
-        PrinterItem[] items = new PrinterItem[printers.length];
-        for (int i = 0; i < printers.length; i++) {
-            items[i] = new PrinterItem(printers[i]);
-        }
-        var combo = new LammComboBox<>("Imprimante", items);
-        javax.print.PrintService defaultPrinter = PrintServiceLookup.lookupDefaultPrintService();
-        if (defaultPrinter != null) {
+        var items = FXCollections.<PrinterItem>observableArrayList();
+        for (var p : printers) items.add(new PrinterItem(p));
+        var combo = new ComboBox<>(items);
+        javax.print.PrintService def = PrintServiceLookup.lookupDefaultPrintService();
+        if (def != null) {
             for (var item : items) {
-                if (defaultPrinter.equals(item.service())) {
-                    combo.getCombo().setSelectedItem(item);
+                if (def.equals(item.service())) {
+                    combo.getSelectionModel().select(item);
                     break;
                 }
             }
         }
+        if (combo.getSelectionModel().isEmpty() && !items.isEmpty()) {
+            combo.getSelectionModel().selectFirst();
+        }
         return combo;
     }
 
-    private JPanel buildFilesCard() {
-        var card = new LammCard();
-        card.setLayout(new BorderLayout(0, 8));
-        card.setTitle("Fichiers (glisser-déposer PDF, images, ZIP ou dossiers ici)");
-
-        var treeScroll = new LammScrollPane(fileTree);
-        treeScroll.setPreferredSize(new Dimension(0, 150));
-        card.add(treeScroll, BorderLayout.CENTER);
-
-        new DropTarget(fileTree, new DropTargetAdapter() {
-            @Override
-            public void drop(DropTargetDropEvent e) {
-                try {
-                    e.acceptDrop(DnDConstants.ACTION_COPY);
-                    @SuppressWarnings("unchecked")
-                    List<File> droppedFiles = (List<File>) e.getTransferable().getTransferData(DataFlavor.javaFileListFlavor);
-                    importFiles(droppedFiles);
-                    e.dropComplete(true);
-                } catch (Exception ex) {
-                    e.rejectDrop();
-                }
-            }
+    private void wirePreferenceListeners() {
+        batchSizeSpinner.valueProperty().addListener((o, ov, nv) -> {
+            if (nv != null) PreferencesManager.setBatchSize(nv);
         });
-
-        var buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        buttons.setOpaque(false);
-        buttons.add(addButton);
-        buttons.add(removeButton);
-        card.add(buttons, BorderLayout.SOUTH);
-        return card;
+        rectoVersoCombo.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) ->
+            PreferencesManager.setDuplex(nv.intValue()));
+        orientationCombo.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) ->
+            PreferencesManager.setOrientation(nv.intValue()));
+        colorCombo.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) ->
+            PreferencesManager.setColor(nv.intValue()));
     }
 
-    private JPanel buildSettingsCard() {
-        var card = new LammCard();
-        card.setLayout(new GridBagLayout());
-        card.setTitle("Paramètres");
-
-        var gbc = new GridBagConstraints();
-        gbc.insets = new Insets(2, 6, 2, 6);
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.weightx = 1.0;
-
-        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
-        card.add(printerCombo, gbc);
-        gbc.gridwidth = 1;
-        gbc.gridx = 2; gbc.gridy = 0; card.add(batchSizeSpinner, gbc);
-        gbc.gridx = 3;                 card.add(copiesSpinner, gbc);
-
-        gbc.gridx = 0; gbc.gridy = 1; card.add(rectoVersoCombo, gbc);
-        gbc.gridx = 1;                 card.add(orientationCombo, gbc);
-        gbc.gridx = 2;                 card.add(colorCombo, gbc);
-        gbc.gridx = 3;                 card.add(pagesPerSheetCombo, gbc);
-
-        return card;
-    }
-
-    private JPanel buildBottom() {
-        var wrapper = new JPanel(new BorderLayout(0, 8));
-        wrapper.setOpaque(false);
-
-        var logsCard = new LammCard();
-        logsCard.setLayout(new BorderLayout());
-        logsCard.setTitle("Journal");
-        logsCard.add(logArea, BorderLayout.CENTER);
-        wrapper.add(logsCard, BorderLayout.CENTER);
-
-        var actionRow = new JPanel(new BorderLayout(12, 0));
-        actionRow.setOpaque(false);
-        actionRow.add(progressBar, BorderLayout.CENTER);
-
-        var btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-        btns.setOpaque(false);
-        btns.add(cancelButton);
-        btns.add(printButton);
-        actionRow.add(btns, BorderLayout.EAST);
-        wrapper.add(actionRow, BorderLayout.SOUTH);
-
-        return wrapper;
-    }
-
-    private PrintSettings buildPrintSettings() {
-        PrintSettings.DuplexMode duplex = switch (rectoVersoCombo.getCombo().getSelectedIndex()) {
-            case 1 -> PrintSettings.DuplexMode.LONG_EDGE;
-            case 2 -> PrintSettings.DuplexMode.SHORT_EDGE;
-            default -> PrintSettings.DuplexMode.RECTO;
-        };
-
-        return new PrintSettings(
-                batchSizeSpinner.getValue(),
-                copiesSpinner.getValue(),
-                duplex,
-                orientationCombo.getCombo().getSelectedIndex() == 1
-                        ? PrintSettings.Orientation.LANDSCAPE : PrintSettings.Orientation.PORTRAIT,
-                colorCombo.getCombo().getSelectedIndex() == 1
-                        ? PrintSettings.ColorMode.MONOCHROME : PrintSettings.ColorMode.COLOR,
-                Integer.parseInt((String) pagesPerSheetCombo.getSelectedItem())
-        );
-    }
-
-    private void importFiles(List<File> files) {
-        LogService.info("Import de " + files.size() + " élément(s)");
-        appendLog("Import en cours...");
-        setControlsEnabled(false);
-        progressBar.setIndeterminate(true);
-        progressBar.setString("Chargement…");
-
-        SwingWorker<FileImportService.ImportResult, Void> worker = new SwingWorker<>() {
-            @Override
-            protected FileImportService.ImportResult doInBackground() {
-                return fileImportService.importFiles(files, displayName -> {});
+    private void installDragAndDrop() {
+        fileTree.setOnDragOver(e -> {
+            if (e.getDragboard().hasFiles()) e.acceptTransferModes(TransferMode.COPY);
+            e.consume();
+        });
+        fileTree.setOnDragDropped(e -> {
+            var db = e.getDragboard();
+            if (db.hasFiles()) {
+                importFiles(db.getFiles());
+                e.setDropCompleted(true);
             }
-
-            @Override
-            protected void done() {
-                progressBar.setIndeterminate(false);
-                progressBar.setString("");
-                progressBar.setValue(0);
-                try {
-                    FileImportService.ImportResult result = get();
-
-                    for (File f : result.accepted()) {
-                        if (!allFiles.contains(f)) {
-                            allFiles.add(f);
-                        }
-                        resumePages.remove(f);
-                    }
-                    rebuildTree();
-
-                    if (!result.rejected().isEmpty()) {
-                        appendLog("Fichiers ignorés (format non supporté) :");
-                        for (String name : result.rejected()) {
-                            appendLog("  - " + name);
-                            LogService.info("Fichier ignoré : " + name);
-                        }
-                    }
-
-                    if (!result.errors().isEmpty()) {
-                        for (String error : result.errors()) {
-                            appendLog("ERREUR : " + error);
-                            LogService.error(error);
-                        }
-                    }
-
-                    appendLog("Import terminé : " + result.accepted().size() + " fichier(s) ajouté(s)");
-                    LogService.info("Import terminé : " + result.accepted().size() + " fichier(s)");
-                } catch (Exception ex) {
-                    appendLog("ERREUR : " + ex.getMessage());
-                    LogService.error("Erreur lors de l'import", ex);
-                }
-                setControlsEnabled(true);
-            }
-        };
-        worker.execute();
+            e.consume();
+        });
     }
 
-    private void rebuildTree() {
-        treeRoot.removeAllChildren();
-        Map<String, DefaultMutableTreeNode> folderNodes = new LinkedHashMap<>();
-
-        for (File f : allFiles) {
-            String displayName = fileImportService.getDisplayName(f);
-            String[] parts = displayName.split("/");
-
-            if (parts.length == 1) {
-                treeRoot.add(new DefaultMutableTreeNode(parts[0]));
-            } else {
-                DefaultMutableTreeNode parent = treeRoot;
-                StringBuilder pathKey = new StringBuilder();
-                for (int i = 0; i < parts.length - 1; i++) {
-                    if (i > 0) pathKey.append("/");
-                    pathKey.append(parts[i]);
-                    String key = pathKey.toString();
-
-                    if (!folderNodes.containsKey(key)) {
-                        var folderNode = new DefaultMutableTreeNode(parts[i]);
-                        parent.add(folderNode);
-                        folderNodes.put(key, folderNode);
-                    }
-                    parent = folderNodes.get(key);
-                }
-                parent.add(new DefaultMutableTreeNode(parts[parts.length - 1]));
-            }
-        }
-
-        treeModel.reload();
-        for (int i = 0; i < fileTree.getRowCount(); i++) {
-            fileTree.expandRow(i);
-        }
-    }
+    /* ---------- File handling ---------- */
 
     private void addFiles() {
-        var chooser = new JFileChooser();
-        chooser.setMultiSelectionEnabled(true);
-        chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-        chooser.setFileFilter(new FileNameExtensionFilter("PDF, images et ZIP",
-                "pdf", "zip", "jpg", "jpeg", "png", "bmp", "gif", "tiff", "tif"));
-        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            importFiles(List.of(chooser.getSelectedFiles()));
+        var chooser = new FileChooser();
+        chooser.setTitle("Ajouter des fichiers");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+            "PDF, images et ZIP",
+            "*.pdf", "*.zip", "*.jpg", "*.jpeg", "*.png", "*.bmp", "*.gif", "*.tiff", "*.tif"));
+        var selected = chooser.showOpenMultipleDialog(app.stage());
+        if (selected != null && !selected.isEmpty()) {
+            importFiles(selected);
         }
     }
 
     private void removeSelected() {
-        var paths = fileTree.getSelectionPaths();
-        if (paths == null) return;
+        var selectedItems = fileTree.getSelectionModel().getSelectedItems();
+        if (selectedItems == null || selectedItems.isEmpty()) return;
 
         Set<String> removedDisplayNames = new HashSet<>();
-        for (var path : paths) {
-            StringBuilder name = new StringBuilder();
-            for (int i = 1; i < path.getPathCount(); i++) {
-                if (i > 1) name.append("/");
-                name.append(path.getPathComponent(i).toString());
-            }
-            removedDisplayNames.add(name.toString());
+        for (var item : new ArrayList<>(selectedItems)) {
+            removedDisplayNames.add(buildPath(item));
         }
 
         allFiles.removeIf(f -> {
@@ -484,15 +275,125 @@ public class MainWindow extends LammFrame {
         rebuildTree();
     }
 
+    private static String buildPath(TreeItem<String> item) {
+        var parts = new ArrayList<String>();
+        var cur = item;
+        while (cur != null && cur.getParent() != null) {
+            parts.add(0, cur.getValue());
+            cur = cur.getParent();
+        }
+        return String.join("/", parts);
+    }
+
+    private void importFiles(List<File> files) {
+        LogService.info("Import de " + files.size() + " élément(s)");
+        appendLog("Import en cours...");
+        setControlsEnabled(false);
+        progressBar.setProgress(-1);
+        progressLabel.setText("Chargement…");
+
+        var task = new Task<FileImportService.ImportResult>() {
+            @Override
+            protected FileImportService.ImportResult call() {
+                return fileImportService.importFiles(files, displayName -> {});
+            }
+        };
+        task.setOnSucceeded(e -> {
+            progressBar.setProgress(0);
+            progressLabel.setText("");
+            FileImportService.ImportResult result = task.getValue();
+            for (File f : result.accepted()) {
+                if (!allFiles.contains(f)) allFiles.add(f);
+                resumePages.remove(f);
+            }
+            rebuildTree();
+            if (!result.rejected().isEmpty()) {
+                appendLog("Fichiers ignorés (format non supporté) :");
+                for (String name : result.rejected()) {
+                    appendLog("  - " + name);
+                    LogService.info("Fichier ignoré : " + name);
+                }
+            }
+            if (!result.errors().isEmpty()) {
+                for (String error : result.errors()) {
+                    appendLog("ERREUR : " + error);
+                    LogService.error(error);
+                }
+            }
+            appendLog("Import terminé : " + result.accepted().size() + " fichier(s) ajouté(s)");
+            LogService.info("Import terminé : " + result.accepted().size() + " fichier(s)");
+            setControlsEnabled(true);
+        });
+        task.setOnFailed(e -> {
+            progressBar.setProgress(0);
+            progressLabel.setText("");
+            Throwable ex = task.getException();
+            appendLog("ERREUR : " + (ex == null ? "?" : ex.getMessage()));
+            LogService.error("Erreur lors de l'import", ex);
+            setControlsEnabled(true);
+        });
+        var t = new Thread(task, "lammprimante-import");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void rebuildTree() {
+        treeRoot.getChildren().clear();
+        Map<String, TreeItem<String>> folderNodes = new LinkedHashMap<>();
+        for (File f : allFiles) {
+            String displayName = fileImportService.getDisplayName(f);
+            String[] parts = displayName.split("/");
+            if (parts.length == 1) {
+                treeRoot.getChildren().add(new TreeItem<>(parts[0]));
+            } else {
+                TreeItem<String> parent = treeRoot;
+                StringBuilder pathKey = new StringBuilder();
+                for (int i = 0; i < parts.length - 1; i++) {
+                    if (i > 0) pathKey.append("/");
+                    pathKey.append(parts[i]);
+                    String key = pathKey.toString();
+                    if (!folderNodes.containsKey(key)) {
+                        var folderNode = new TreeItem<>(parts[i]);
+                        folderNode.setExpanded(true);
+                        parent.getChildren().add(folderNode);
+                        folderNodes.put(key, folderNode);
+                    }
+                    parent = folderNodes.get(key);
+                }
+                parent.getChildren().add(new TreeItem<>(parts[parts.length - 1]));
+            }
+        }
+    }
+
+    /* ---------- Print pipeline ---------- */
+
+    private PrintSettings buildPrintSettings() {
+        PrintSettings.DuplexMode duplex = switch (rectoVersoCombo.getSelectionModel().getSelectedIndex()) {
+            case 1 -> PrintSettings.DuplexMode.LONG_EDGE;
+            case 2 -> PrintSettings.DuplexMode.SHORT_EDGE;
+            default -> PrintSettings.DuplexMode.RECTO;
+        };
+        return new PrintSettings(
+            batchSizeSpinner.getValue(),
+            copiesSpinner.getValue(),
+            duplex,
+            orientationCombo.getSelectionModel().getSelectedIndex() == 1
+                ? PrintSettings.Orientation.LANDSCAPE : PrintSettings.Orientation.PORTRAIT,
+            colorCombo.getSelectionModel().getSelectedIndex() == 1
+                ? PrintSettings.ColorMode.MONOCHROME : PrintSettings.ColorMode.COLOR,
+            Integer.parseInt(pagesPerSheetCombo.getSelectionModel().getSelectedItem())
+        );
+    }
+
     private void startPrinting() {
         if (allFiles.isEmpty()) {
-            LammDialog.warning(this, "Attention", "Aucun fichier sélectionné.");
+            warning("Attention", "Aucun fichier sélectionné.");
             return;
         }
-        PrinterItem item = printerCombo.getSelectedItem();
+        PrinterItem item = printerCombo.getSelectionModel().getSelectedItem();
         javax.print.PrintService printer = item != null ? item.service() : null;
         if (printer == null) {
-            LammDialog.error(this, "Erreur", "Aucune imprimante disponible.");
+            error("Erreur", "Aucune imprimante disponible.");
             return;
         }
         PrintSettings settings = buildPrintSettings();
@@ -501,44 +402,40 @@ public class MainWindow extends LammFrame {
         final int total = files.size();
 
         setControlsEnabled(false);
-        cancelButton.setEnabled(true);
-        logArea.setText("");
-        progressBar.setValue(0);
-        progressBar.setString("0 / " + total);
+        cancelButton.setDisable(false);
+        logArea.clear();
+        progressBar.setProgress(0);
+        progressLabel.setText("0 / " + total);
 
         LogService.info("Lancement impression : " + total + " fichier(s), imprimante=" + printer.getName());
 
         List<File> failedFiles = new ArrayList<>();
-        SwingWorker<Void, String> worker = new SwingWorker<>() {
+        var task = new Task<Void>() {
             @Override
-            protected Void doInBackground() {
+            protected Void call() {
                 PrintService service = new PrintService();
                 for (int i = 0; i < total; i++) {
-                    if (isCancelled() || Thread.currentThread().isInterrupted()) {
-                        return null;
-                    }
+                    if (isCancelled() || Thread.currentThread().isInterrupted()) return null;
                     final int fileIndex = i;
                     File file = files.get(i);
                     int startPage = resumePages.getOrDefault(file, 0);
                     try {
                         service.print(file, printer, settings, startPage, progress -> {
                             String msg = String.format("[%s] Lot %d/%d (pages %d à %d) envoyé",
-                                    progress.fileName(), progress.batchNumber(), progress.totalBatches(),
-                                    progress.fromPage(), progress.toPage());
-                            publish(msg);
+                                progress.fileName(), progress.batchNumber(), progress.totalBatches(),
+                                progress.fromPage(), progress.toPage());
+                            Platform.runLater(() -> appendLog(msg));
                             LogService.info(msg);
-
                             float fileFrac = progress.totalBatches() > 0
-                                    ? (float) progress.batchNumber() / progress.totalBatches()
-                                    : 0f;
+                                ? (float) progress.batchNumber() / progress.totalBatches() : 0f;
                             float overall = (fileIndex + fileFrac) / total;
-                            SwingUtilities.invokeLater(() -> progressBar.setValue(overall));
+                            Platform.runLater(() -> progressBar.setProgress(overall));
                         });
                         resumePages.remove(file);
                         int current = i + 1;
-                        SwingUtilities.invokeLater(() -> {
-                            progressBar.setValue((float) current / total);
-                            progressBar.setString(current + " / " + total);
+                        Platform.runLater(() -> {
+                            progressBar.setProgress((double) current / total);
+                            progressLabel.setText(current + " / " + total);
                         });
                     } catch (PrintService.PartialPrintException ex) {
                         if (isCancelled() || Thread.currentThread().isInterrupted()) return null;
@@ -546,88 +443,111 @@ public class MainWindow extends LammFrame {
                         resumePages.put(file, resume);
                         String raw = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
                         String friendly = "Le spooler a interrompu l'envoi après plusieurs tentatives — reprise prévue à la page " + (resume + 1);
-                        publish("ERREUR [" + file.getName() + "] : " + friendly);
+                        Platform.runLater(() -> appendLog("ERREUR [" + file.getName() + "] : " + friendly));
                         LogService.error("Impression partielle pour " + file.getName() + " — reprise page " + (resume + 1) + " — " + raw, ex);
                         failedFiles.add(file);
                     } catch (java.awt.print.PrinterException ex) {
                         if (isCancelled() || Thread.currentThread().isInterrupted()) return null;
                         String raw = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
                         String friendly = "Le spooler a interrompu l'envoi après plusieurs tentatives (imprimante occupée ou hors ligne)";
-                        publish("ERREUR [" + file.getName() + "] : " + friendly);
+                        Platform.runLater(() -> appendLog("ERREUR [" + file.getName() + "] : " + friendly));
                         LogService.error("Impression échouée pour " + file.getName() + " — " + raw, ex);
                         failedFiles.add(file);
                     } catch (Exception ex) {
                         if (isCancelled() || Thread.currentThread().isInterrupted()) return null;
                         String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
-                        publish("ERREUR [" + file.getName() + "] : " + msg);
+                        Platform.runLater(() -> appendLog("ERREUR [" + file.getName() + "] : " + msg));
                         LogService.error("Impression échouée pour " + file.getName(), ex);
                         failedFiles.add(file);
                     }
                 }
                 return null;
             }
-
-            @Override
-            protected void process(List<String> chunks) {
-                for (String msg : chunks) {
-                    appendLog(msg);
-                }
-            }
-
-            @Override
-            protected void done() {
-                setControlsEnabled(true);
-                cancelButton.setEnabled(false);
-                currentWorker = null;
-                if (isCancelled()) {
-                    appendLog("--- Annulé ---");
-                    progressBar.setString("Annulé");
-                    LogService.info("Impression annulée par l'utilisateur");
-                } else {
-                    appendLog("--- Terminé ---");
-                    if (!failedFiles.isEmpty()) {
-                        appendLog("Détails des erreurs dans : " + LogService.getLogFile());
-                        appendLog(failedFiles.size() + " fichier(s) non imprimé(s) rechargé(s) — cliquer sur Imprimer pour réessayer");
-                        allFiles.clear();
-                        allFiles.addAll(failedFiles);
-                        rebuildTree();
-                        progressBar.setString(failedFiles.size() + " en échec");
-                        LogService.info("Impression terminée avec " + failedFiles.size() + " échec(s), fichiers rechargés dans la liste");
-                    } else {
-                        progressBar.setString("Terminé");
-                        LogService.info("Impression terminée");
-                    }
-                }
-            }
         };
-        currentWorker = worker;
-        worker.execute();
+
+        Runnable finish = () -> {
+            setControlsEnabled(true);
+            cancelButton.setDisable(true);
+            currentTask = null;
+        };
+
+        task.setOnSucceeded(e -> {
+            finish.run();
+            appendLog("--- Terminé ---");
+            if (!failedFiles.isEmpty()) {
+                appendLog("Détails des erreurs dans : " + LogService.getLogFile());
+                appendLog(failedFiles.size() + " fichier(s) non imprimé(s) rechargé(s) — cliquer sur Imprimer pour réessayer");
+                allFiles.clear();
+                allFiles.addAll(failedFiles);
+                rebuildTree();
+                progressLabel.setText(failedFiles.size() + " en échec");
+                LogService.info("Impression terminée avec " + failedFiles.size() + " échec(s), fichiers rechargés dans la liste");
+            } else {
+                progressLabel.setText("Terminé");
+                LogService.info("Impression terminée");
+            }
+        });
+        task.setOnCancelled(e -> {
+            finish.run();
+            appendLog("--- Annulé ---");
+            progressLabel.setText("Annulé");
+            LogService.info("Impression annulée par l'utilisateur");
+        });
+        task.setOnFailed(e -> {
+            finish.run();
+            Throwable ex = task.getException();
+            appendLog("ERREUR : " + (ex == null ? "?" : ex.getMessage()));
+            LogService.error("Échec global d'impression", ex);
+        });
+
+        currentTask = task;
+        var t = new Thread(task, "lammprimante-print");
+        t.setDaemon(true);
+        t.start();
     }
 
     private void cancelPrinting() {
-        if (currentWorker == null || currentWorker.isDone()) return;
-        cancelButton.setEnabled(false);
+        if (currentTask == null || !currentTask.isRunning()) return;
+        cancelButton.setDisable(true);
         appendLog("Annulation demandée — le lot en cours va se terminer…");
         LogService.info("Annulation demandée");
-        currentWorker.cancel(true);
+        currentTask.cancel(true);
     }
 
+    /* ---------- Misc ---------- */
+
     private void appendLog(String message) {
-        var area = logArea.getTextArea();
-        area.append(message + "\n");
-        area.setCaretPosition(area.getDocument().getLength());
+        logArea.appendText(message + "\n");
     }
 
     private void setControlsEnabled(boolean enabled) {
-        printButton.setEnabled(enabled);
-        addButton.setEnabled(enabled);
-        removeButton.setEnabled(enabled);
-        printerCombo.getCombo().setEnabled(enabled);
-        batchSizeSpinner.getSpinner().setEnabled(enabled);
-        copiesSpinner.getSpinner().setEnabled(enabled);
-        rectoVersoCombo.getCombo().setEnabled(enabled);
-        pagesPerSheetCombo.getCombo().setEnabled(enabled);
-        orientationCombo.getCombo().setEnabled(enabled);
-        colorCombo.getCombo().setEnabled(enabled);
+        printButton.setDisable(!enabled);
+        addButton.setDisable(!enabled);
+        removeButton.setDisable(!enabled);
+        printerCombo.setDisable(!enabled);
+        batchSizeSpinner.setDisable(!enabled);
+        copiesSpinner.setDisable(!enabled);
+        rectoVersoCombo.setDisable(!enabled);
+        pagesPerSheetCombo.setDisable(!enabled);
+        orientationCombo.setDisable(!enabled);
+        colorCombo.setDisable(!enabled);
+    }
+
+    private void warning(String header, String content) {
+        showAlert(Alert.AlertType.WARNING, header, content);
+    }
+
+    private void error(String header, String content) {
+        showAlert(Alert.AlertType.ERROR, header, content);
+    }
+
+    private void showAlert(Alert.AlertType type, String header, String content) {
+        var alert = new Alert(type);
+        alert.setTitle(header);
+        alert.setHeaderText(header);
+        alert.setContentText(content);
+        alert.initOwner(app.stage());
+        app.styleDialog(alert);
+        alert.showAndWait();
     }
 }
