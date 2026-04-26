@@ -60,7 +60,7 @@ public class MainWindow extends VBox {
     private final ComboBox<String> colorCombo;
 
     private final TextArea logArea = new TextArea();
-    private final LammButtonFx printButton = LammButtonFx.accent("Imprimer");
+    private final LammButtonFx printButton = LammButtonFx.primary("Imprimer");
     private final LammButtonFx cancelButton = new LammButtonFx("Annuler");
     private final LammButtonFx addButton = new LammButtonFx("Ajouter des fichiers…");
     private final LammButtonFx removeButton = new LammButtonFx("Retirer");
