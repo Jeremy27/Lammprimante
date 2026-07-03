@@ -32,6 +32,18 @@
             <artifactId>pdfbox</artifactId>
             <version>3.0.4</version>
         </dependency>
+        <!-- Décodeurs ImageIO pour les PDF scannés : sans eux, PDFBox imprime
+             les pages compressées en JBIG2/JPEG2000 entièrement blanches. -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>jbig2-imageio</artifactId>
+            <version>3.0.4</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.jai-imageio</groupId>
+            <artifactId>jai-imageio-jpeg2000</artifactId>
+            <version>1.4.0</version>
+        </dependency>
         <dependency>
             <groupId>fr.courel</groupId>
             <artifactId>lammui</artifactId>
@@ -77,6 +89,9 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>fr.courel.lammprimante.Main</mainClass>
                                 </transformer>
+                                <!-- Fusionne les META-INF/services, sinon les SPI ImageIO
+                                     des décodeurs sont écrasés au shading. -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
                             <filters>
                                 <filter>

@@ -51,6 +51,7 @@ public class App extends Application {
 
     public static void main(String[] args) {
         LogService.info("Démarrage de Lammprimante v" + getVersion());
+        LogService.capturePdfboxWarnings();
         launch(args);
     }
 

@@ -15,6 +15,40 @@ public class LogService {
     private static final long MAX_SIZE = 5 * 1024 * 1024; // 5 Mo
     private static final Path LOG_FILE = resolveLogFile();
 
+    // Référence forte obligatoire : JUL ne retient les loggers que faiblement,
+    // sans elle le handler disparaît au premier GC.
+    private static java.util.logging.Logger pdfboxLogger;
+
+    /**
+     * Route les warnings/erreurs internes de PDFBox (commons-logging → JUL)
+     * vers lammprimante.log. Sans ça, les erreurs de rendu (ex : décodeur
+     * d'image manquant → page imprimée blanche) partent sur stderr, invisible
+     * dans l'app installée.
+     */
+    public static synchronized void capturePdfboxWarnings() {
+        if (pdfboxLogger != null) {
+            return;
+        }
+        pdfboxLogger = java.util.logging.Logger.getLogger("org.apache.pdfbox");
+        pdfboxLogger.addHandler(new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord record) {
+                if (record.getLevel().intValue() < java.util.logging.Level.WARNING.intValue()) {
+                    return;
+                }
+                String message = "[pdfbox] " + record.getMessage();
+                if (record.getThrown() != null) {
+                    error(message, record.getThrown());
+                } else {
+                    warn(message);
+                }
+            }
+
+            @Override public void flush() {}
+            @Override public void close() {}
+        });
+    }
+
     private static Path resolveLogFile() {
         // À côté du JAR, ou dans le répertoire utilisateur en fallback
         try {
