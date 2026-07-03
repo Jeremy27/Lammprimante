@@ -53,6 +53,15 @@ public class PreferencesManager {
         PREFS.putInt(PREF_ORIENTATION, index);
     }
 
+    // Regrouper les images en un seul document à l'impression
+    public static boolean getGroupImages() {
+        return PREFS.getBoolean("groupImages", false);
+    }
+
+    public static void setGroupImages(boolean group) {
+        PREFS.putBoolean("groupImages", group);
+    }
+
     // Couleur (index : 0 = couleur, 1 = N&B)
     public static int getColor() {
         return PREFS.getInt(PREF_COLOR, 0);

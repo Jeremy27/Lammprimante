@@ -231,6 +231,9 @@ public class App extends Application {
         var resetItem = new MenuItem("Réinitialiser la fenêtre");
         resetItem.setOnAction(e -> resetWindow());
 
+        var logItem = new MenuItem("Ouvrir le journal");
+        logItem.setOnAction(e -> getHostServices().showDocument(LogService.getLogFile().toUri().toString()));
+
         var aboutItem = new MenuItem("À propos…");
         aboutItem.setOnAction(e -> showAbout());
 
@@ -240,6 +243,7 @@ public class App extends Application {
             accentMenu,
             new SeparatorMenuItem(),
             resetItem,
+            logItem,
             aboutItem
         );
 

@@ -15,10 +15,16 @@ public record PrintSettings(
     public enum Orientation { PORTRAIT, LANDSCAPE }
     public enum ColorMode { COLOR, MONOCHROME }
 
+    /**
+     * Attributs d'un job d'impression. Toujours Copies(1) : les copies sont
+     * bouclées au niveau du document par PrintService pour sortir des
+     * exemplaires complets collationnés (Copies(n) par lot donnerait
+     * lot1,lot1,lot2,lot2…).
+     */
     public HashPrintRequestAttributeSet toAttributes() {
         HashPrintRequestAttributeSet attrs = new HashPrintRequestAttributeSet();
 
-        attrs.add(new Copies(copies));
+        attrs.add(new Copies(1));
 
         attrs.add(switch (duplex) {
             case LONG_EDGE -> Sides.TWO_SIDED_LONG_EDGE;

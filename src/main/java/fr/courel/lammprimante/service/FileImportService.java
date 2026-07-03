@@ -1,5 +1,10 @@
 package fr.courel.lammprimante.service;
 
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
+
+import javax.imageio.ImageIO;
 import java.io.*;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
@@ -21,6 +26,46 @@ public class FileImportService {
     private final List<Path> tempDirs = new ArrayList<>();
 
     public record ImportResult(List<File> accepted, List<String> rejected, List<String> errors) {}
+
+    /** pages = -1 si inconnu (fichier chiffré sans mot de passe valide, ou illisible). */
+    public record FileInfo(int pages, boolean encrypted) {
+        public static final FileInfo UNKNOWN = new FileInfo(-1, false);
+    }
+
+    /**
+     * Compte les pages d'un fichier (PDF ou image, y compris TIFF multi-pages)
+     * et détecte les PDF protégés par mot de passe.
+     */
+    public static FileInfo analyze(File file, String password) {
+        if (isImage(file)) {
+            return new FileInfo(countImagePages(file), false);
+        }
+        try (PDDocument doc = password == null ? Loader.loadPDF(file) : Loader.loadPDF(file, password)) {
+            return new FileInfo(doc.getNumberOfPages(), false);
+        } catch (InvalidPasswordException ex) {
+            return new FileInfo(-1, true);
+        } catch (IOException ex) {
+            LogService.warn("Analyse impossible pour " + file.getName() + " : " + ex.getMessage());
+            return FileInfo.UNKNOWN;
+        }
+    }
+
+    private static int countImagePages(File file) {
+        try (var iis = ImageIO.createImageInputStream(file)) {
+            var readers = iis == null ? null : ImageIO.getImageReaders(iis);
+            if (readers != null && readers.hasNext()) {
+                var reader = readers.next();
+                try {
+                    reader.setInput(iis);
+                    return Math.max(1, reader.getNumImages(true));
+                } finally {
+                    reader.dispose();
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        return 1;
+    }
 
     public String getDisplayName(File file) {
         return displayNames.getOrDefault(file, file.getName());
@@ -136,7 +181,12 @@ public class FileImportService {
 
                     // Preserve directory structure to avoid name collisions
                     Path relativePath = Path.of(entryName);
-                    Path extractPath = tempDir.resolve(relativePath);
+                    Path extractPath = tempDir.resolve(relativePath).normalize();
+                    if (!extractPath.startsWith(tempDir)) {
+                        // Zip Slip : entrée avec des ".." qui sortirait du répertoire temporaire
+                        rejected.add(entryName + " (chemin invalide, dans " + zipFile.getName() + ")");
+                        continue;
+                    }
                     Files.createDirectories(extractPath.getParent());
 
                     try (var bos = new BufferedOutputStream(new FileOutputStream(extractPath.toFile()), BUFFER_SIZE)) {

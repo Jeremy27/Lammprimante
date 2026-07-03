@@ -3,6 +3,7 @@ package fr.courel.lammprimante.view;
 import fr.courel.lammprimante.App;
 import fr.courel.lammprimante.config.PreferencesManager;
 import fr.courel.lammprimante.model.PrintSettings;
+import fr.courel.lammprimante.service.BatchPlanner;
 import fr.courel.lammprimante.service.FileImportService;
 import fr.courel.lammprimante.service.LogService;
 import fr.courel.lammprimante.service.PrintService;
@@ -18,10 +19,12 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Alert;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.TreeItem;
 import javafx.scene.input.TransferMode;
 import javafx.scene.layout.GridPane;
@@ -46,7 +49,12 @@ public class MainWindow extends VBox {
     private final App app;
     private final FileImportService fileImportService = new FileImportService();
     private final List<File> allFiles = new ArrayList<>();
-    private final Map<File, Integer> resumePages = new HashMap<>();
+
+    private final Map<File, PrintService.ResumePoint> resumePoints = new HashMap<>();
+    private final Map<File, Integer> pageCounts = new HashMap<>();
+    private final Map<File, String> passwords = new HashMap<>();
+    private final Map<File, PrintService.PageRange> ranges = new HashMap<>();
+    private final Map<TreeItem<String>, File> leafItems = new HashMap<>();
 
     private final TreeItem<String> treeRoot = new TreeItem<>("Fichiers");
     private final LammTreeFx<String> fileTree = new LammTreeFx<>(treeRoot);
@@ -58,14 +66,18 @@ public class MainWindow extends VBox {
     private final ComboBox<String> pagesPerSheetCombo;
     private final ComboBox<String> orientationCombo;
     private final ComboBox<String> colorCombo;
+    private final CheckBox groupImagesCheck = new CheckBox("Regrouper les images en un document");
 
     private final TextArea logArea = new TextArea();
     private final LammButtonFx printButton = LammButtonFx.primary("Imprimer");
     private final LammButtonFx cancelButton = new LammButtonFx("Annuler");
     private final LammButtonFx addButton = new LammButtonFx("Ajouter des fichiers…");
     private final LammButtonFx removeButton = new LammButtonFx("Retirer");
+    private final LammButtonFx moveUpButton = new LammButtonFx("↑");
+    private final LammButtonFx moveDownButton = new LammButtonFx("↓");
     private final LammProgressBarFx progressBar = new LammProgressBarFx(0);
     private final Label progressLabel = new Label();
+    private final Label summaryLabel = new Label();
 
     private Task<Void> currentTask;
 
@@ -73,6 +85,22 @@ public class MainWindow extends VBox {
         @Override
         public String toString() {
             return service != null ? service.getName() : "—";
+        }
+    }
+
+    /** Unité d'impression : un fichier, ou un groupe d'images fusionnées en un document. */
+    private record PrintUnit(String label, File file, List<File> images) {
+        static PrintUnit single(File f) {
+            return new PrintUnit(f.getName(), f, null);
+        }
+        static PrintUnit imageGroup(List<File> images) {
+            return new PrintUnit("Images (" + images.size() + ")", null, List.copyOf(images));
+        }
+        List<File> allFiles() {
+            return file != null ? List.of(file) : images;
+        }
+        File resumeKey() {
+            return file != null ? file : images.get(0);
         }
     }
 
@@ -91,12 +119,20 @@ public class MainWindow extends VBox {
         orientationCombo.getSelectionModel().select(PreferencesManager.getOrientation());
         colorCombo = new ComboBox<>(FXCollections.observableArrayList("Couleur", "Noir et blanc"));
         colorCombo.getSelectionModel().select(PreferencesManager.getColor());
+        groupImagesCheck.setSelected(PreferencesManager.getGroupImages());
 
         wirePreferenceListeners();
+        wireSummaryListeners();
+        snapBatchParity();
 
         treeRoot.setExpanded(true);
         fileTree.setShowRoot(false);
         fileTree.getSelectionModel().setSelectionMode(javafx.scene.control.SelectionMode.MULTIPLE);
+        fileTree.setOnMouseClicked(e -> {
+            if (e.getClickCount() == 2) {
+                editRangeForSelection();
+            }
+        });
 
         logArea.setEditable(false);
         logArea.setPrefRowCount(6);
@@ -106,6 +142,8 @@ public class MainWindow extends VBox {
 
         addButton.setOnAction(e -> addFiles());
         removeButton.setOnAction(e -> removeSelected());
+        moveUpButton.setOnAction(e -> moveSelected(-1));
+        moveDownButton.setOnAction(e -> moveSelected(1));
         printButton.setOnAction(e -> startPrinting());
         cancelButton.setOnAction(e -> cancelPrinting());
 
@@ -115,6 +153,7 @@ public class MainWindow extends VBox {
         setPadding(new Insets(16, 20, 20, 20));
         getChildren().addAll(buildSettingsCard(), buildFilesCard(), buildBottom());
         VBox.setVgrow(getChildren().get(1), Priority.ALWAYS);
+        updateSummary();
     }
 
     public void shutdown() {
@@ -155,19 +194,23 @@ public class MainWindow extends VBox {
         grid.add(labeled("Orientation", orientationCombo), 1, 1);
         grid.add(labeled("Couleur", colorCombo), 2, 1);
         grid.add(labeled("Pages par feuille", pagesPerSheetCombo), 3, 1);
+        grid.add(groupImagesCheck, 0, 2, 2, 1);
 
         card.getChildren().add(grid);
         return card;
     }
 
     private LammCardFx buildFilesCard() {
-        var card = new LammCardFx("Fichiers (glisser-déposer PDF, images, ZIP ou dossiers ici)");
+        var card = new LammCardFx("Fichiers (glisser-déposer PDF, images, ZIP ou dossiers — double-clic : plage de pages)");
         var scroll = new ScrollPane(fileTree);
         scroll.setFitToWidth(true);
         scroll.setPrefHeight(180);
         VBox.setVgrow(scroll, Priority.ALWAYS);
 
-        var buttons = new HBox(8, addButton, removeButton);
+        var spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        summaryLabel.getStyleClass().add("lamm-subtitle");
+        var buttons = new HBox(8, addButton, removeButton, moveUpButton, moveDownButton, spacer, summaryLabel);
         buttons.setAlignment(Pos.CENTER_LEFT);
 
         card.getChildren().addAll(scroll, buttons);
@@ -183,7 +226,7 @@ public class MainWindow extends VBox {
         HBox.setHgrow(progressBar, Priority.ALWAYS);
         var actionRow = new HBox(12, progressBar, progressLabel, cancelButton, printButton);
         actionRow.setAlignment(Pos.CENTER_LEFT);
-        progressLabel.setMinWidth(80);
+        progressLabel.setMinWidth(140);
 
         var wrapper = new VBox(8, logsCard, actionRow);
         return wrapper;
@@ -213,22 +256,51 @@ public class MainWindow extends VBox {
 
     private void wirePreferenceListeners() {
         batchSizeSpinner.valueProperty().addListener((o, ov, nv) -> {
-            if (nv != null) PreferencesManager.setBatchSize(nv);
+            if (nv != null) {
+                PreferencesManager.setBatchSize(nv);
+                Platform.runLater(this::snapBatchParity);
+            }
         });
-        rectoVersoCombo.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) ->
-            PreferencesManager.setDuplex(nv.intValue()));
+        rectoVersoCombo.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) -> {
+            PreferencesManager.setDuplex(nv.intValue());
+            Platform.runLater(this::snapBatchParity);
+        });
         orientationCombo.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) ->
             PreferencesManager.setOrientation(nv.intValue()));
         colorCombo.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) ->
             PreferencesManager.setColor(nv.intValue()));
+        groupImagesCheck.selectedProperty().addListener((o, ov, nv) ->
+            PreferencesManager.setGroupImages(nv));
+    }
+
+    private void wireSummaryListeners() {
+        rectoVersoCombo.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) -> updateSummary());
+        pagesPerSheetCombo.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) -> updateSummary());
+        copiesSpinner.valueProperty().addListener((o, ov, nv) -> updateSummary());
+        groupImagesCheck.selectedProperty().addListener((o, ov, nv) -> updateSummary());
+    }
+
+    private boolean duplexSelected() {
+        return rectoVersoCombo.getSelectionModel().getSelectedIndex() != 0;
+    }
+
+    /**
+     * En duplex, garde le spinner sur une valeur paire : un lot impair est de
+     * toute façon ramené à pair par le moteur, autant l'afficher honnêtement.
+     */
+    private void snapBatchParity() {
+        int v = batchSizeSpinner.getValue();
+        if (duplexSelected() && v % 2 != 0) {
+            batchSizeSpinner.setValue(v == 1 ? 2 : Math.min(100, v + 1));
+        }
     }
 
     private void installDragAndDrop() {
-        fileTree.setOnDragOver(e -> {
+        setOnDragOver(e -> {
             if (e.getDragboard().hasFiles()) e.acceptTransferModes(TransferMode.COPY);
             e.consume();
         });
-        fileTree.setOnDragDropped(e -> {
+        setOnDragDropped(e -> {
             var db = e.getDragboard();
             if (db.hasFiles()) {
                 importFiles(db.getFiles());
@@ -256,33 +328,33 @@ public class MainWindow extends VBox {
         var selectedItems = fileTree.getSelectionModel().getSelectedItems();
         if (selectedItems == null || selectedItems.isEmpty()) return;
 
-        Set<String> removedDisplayNames = new HashSet<>();
+        Set<File> toRemove = new HashSet<>();
         for (var item : new ArrayList<>(selectedItems)) {
-            removedDisplayNames.add(buildPath(item));
+            collectFiles(item, toRemove);
         }
-
-        allFiles.removeIf(f -> {
-            String dn = fileImportService.getDisplayName(f);
-            for (String sel : removedDisplayNames) {
-                if (dn.equals(sel) || dn.startsWith(sel + "/")) {
-                    resumePages.remove(f);
-                    return true;
-                }
-            }
-            return false;
-        });
-
+        allFiles.removeAll(toRemove);
+        for (File f : toRemove) {
+            forgetFile(f);
+        }
         rebuildTree();
     }
 
-    private static String buildPath(TreeItem<String> item) {
-        var parts = new ArrayList<String>();
-        var cur = item;
-        while (cur != null && cur.getParent() != null) {
-            parts.add(0, cur.getValue());
-            cur = cur.getParent();
+    private void collectFiles(TreeItem<String> item, Set<File> out) {
+        File f = leafItems.get(item);
+        if (f != null) {
+            out.add(f);
+        } else {
+            for (var child : item.getChildren()) {
+                collectFiles(child, out);
+            }
         }
-        return String.join("/", parts);
+    }
+
+    private void forgetFile(File f) {
+        resumePoints.remove(f);
+        pageCounts.remove(f);
+        passwords.remove(f);
+        ranges.remove(f);
     }
 
     private void importFiles(List<File> files) {
@@ -292,19 +364,39 @@ public class MainWindow extends VBox {
         progressBar.setProgress(-1);
         progressLabel.setText("Chargement…");
 
-        var task = new Task<FileImportService.ImportResult>() {
+        record Analyzed(FileImportService.ImportResult result, Map<File, FileImportService.FileInfo> infos) {}
+        var task = new Task<Analyzed>() {
             @Override
-            protected FileImportService.ImportResult call() {
-                return fileImportService.importFiles(files, displayName -> {});
+            protected Analyzed call() {
+                FileImportService.ImportResult result = fileImportService.importFiles(files, displayName -> {});
+                Map<File, FileImportService.FileInfo> infos = new HashMap<>();
+                for (File f : result.accepted()) {
+                    infos.put(f, FileImportService.analyze(f, null));
+                }
+                return new Analyzed(result, infos);
             }
         };
         task.setOnSucceeded(e -> {
             progressBar.setProgress(0);
             progressLabel.setText("");
-            FileImportService.ImportResult result = task.getValue();
+            FileImportService.ImportResult result = task.getValue().result();
+            Map<File, FileImportService.FileInfo> infos = task.getValue().infos();
+            int added = 0;
             for (File f : result.accepted()) {
-                if (!allFiles.contains(f)) allFiles.add(f);
-                resumePages.remove(f);
+                FileImportService.FileInfo info = infos.get(f);
+                if (info != null && info.encrypted() && !askPassword(f)) {
+                    appendLog("Ignoré (mot de passe manquant) : " + fileImportService.getDisplayName(f));
+                    LogService.info("Fichier chiffré ignoré : " + f.getName());
+                    continue;
+                }
+                if (!allFiles.contains(f)) {
+                    allFiles.add(f);
+                    added++;
+                }
+                resumePoints.remove(f);
+                if (info != null && !info.encrypted()) {
+                    pageCounts.put(f, info.pages());
+                }
             }
             rebuildTree();
             if (!result.rejected().isEmpty()) {
@@ -320,8 +412,8 @@ public class MainWindow extends VBox {
                     LogService.error(error);
                 }
             }
-            appendLog("Import terminé : " + result.accepted().size() + " fichier(s) ajouté(s)");
-            LogService.info("Import terminé : " + result.accepted().size() + " fichier(s)");
+            appendLog("Import terminé : " + added + " fichier(s) ajouté(s)");
+            LogService.info("Import terminé : " + added + " fichier(s)");
             setControlsEnabled(true);
         });
         task.setOnFailed(e -> {
@@ -337,14 +429,41 @@ public class MainWindow extends VBox {
         t.start();
     }
 
+    /** Demande le mot de passe d'un PDF chiffré. Retourne false si l'utilisateur abandonne. */
+    private boolean askPassword(File f) {
+        String displayName = fileImportService.getDisplayName(f);
+        while (true) {
+            var dialog = new TextInputDialog();
+            dialog.setTitle("Document protégé");
+            dialog.setHeaderText("« " + displayName + " » est protégé par un mot de passe.");
+            dialog.setContentText("Mot de passe :");
+            dialog.initOwner(app.stage());
+            app.styleDialog(dialog);
+            var input = dialog.showAndWait();
+            if (input.isEmpty() || input.get().isBlank()) {
+                return false;
+            }
+            FileImportService.FileInfo retry = FileImportService.analyze(f, input.get());
+            if (!retry.encrypted()) {
+                passwords.put(f, input.get());
+                pageCounts.put(f, retry.pages());
+                return true;
+            }
+            appendLog("Mot de passe incorrect pour " + displayName);
+        }
+    }
+
     private void rebuildTree() {
         treeRoot.getChildren().clear();
+        leafItems.clear();
         Map<String, TreeItem<String>> folderNodes = new LinkedHashMap<>();
         for (File f : allFiles) {
             String displayName = fileImportService.getDisplayName(f);
             String[] parts = displayName.split("/");
+            var leaf = new TreeItem<>(leafLabel(f, parts[parts.length - 1]));
+            leafItems.put(leaf, f);
             if (parts.length == 1) {
-                treeRoot.getChildren().add(new TreeItem<>(parts[0]));
+                treeRoot.getChildren().add(leaf);
             } else {
                 TreeItem<String> parent = treeRoot;
                 StringBuilder pathKey = new StringBuilder();
@@ -360,9 +479,207 @@ public class MainWindow extends VBox {
                     }
                     parent = folderNodes.get(key);
                 }
-                parent.getChildren().add(new TreeItem<>(parts[parts.length - 1]));
+                parent.getChildren().add(leaf);
             }
         }
+        updateSummary();
+    }
+
+    private String leafLabel(File f, String baseName) {
+        var sb = new StringBuilder(baseName);
+        Integer pages = pageCounts.get(f);
+        if (pages != null && pages > 0) {
+            sb.append(" — ").append(pages).append(" p.");
+        }
+        var range = ranges.get(f);
+        if (range != null) {
+            sb.append(" (p. ").append(range.from());
+            if (range.to() != range.from()) sb.append("-").append(range.to());
+            sb.append(")");
+        }
+        return sb.toString();
+    }
+
+    /* ---------- Réordonnancement ---------- */
+
+    private static String topKey(String displayName) {
+        int slash = displayName.indexOf('/');
+        return slash < 0 ? displayName : displayName.substring(0, slash);
+    }
+
+    /** Déplace le bloc de premier niveau contenant la sélection dans l'ordre d'impression. */
+    private void moveSelected(int direction) {
+        var item = fileTree.getSelectionModel().getSelectedItem();
+        if (item == null) return;
+        var top = item;
+        while (top.getParent() != null && top.getParent() != treeRoot) {
+            top = top.getParent();
+        }
+        File leafFile = leafItems.get(top);
+        String selKey = leafFile != null
+            ? topKey(fileImportService.getDisplayName(leafFile))
+            : top.getValue();
+
+        Map<String, List<File>> blocks = new LinkedHashMap<>();
+        for (File f : allFiles) {
+            blocks.computeIfAbsent(topKey(fileImportService.getDisplayName(f)), k -> new ArrayList<>()).add(f);
+        }
+        List<String> keys = new ArrayList<>(blocks.keySet());
+        int i = keys.indexOf(selKey);
+        int j = i + direction;
+        if (i < 0 || j < 0 || j >= keys.size()) return;
+        java.util.Collections.swap(keys, i, j);
+
+        allFiles.clear();
+        for (String key : keys) {
+            allFiles.addAll(blocks.get(key));
+        }
+        rebuildTree();
+        selectTopLevel(selKey);
+    }
+
+    private void selectTopLevel(String key) {
+        for (var child : treeRoot.getChildren()) {
+            File f = leafItems.get(child);
+            String childKey = f != null ? topKey(fileImportService.getDisplayName(f)) : child.getValue();
+            if (childKey.equals(key)) {
+                fileTree.getSelectionModel().clearSelection();
+                fileTree.getSelectionModel().select(child);
+                return;
+            }
+        }
+    }
+
+    /* ---------- Plage de pages ---------- */
+
+    private void editRangeForSelection() {
+        var item = fileTree.getSelectionModel().getSelectedItem();
+        File f = item == null ? null : leafItems.get(item);
+        if (f == null || FileImportService.isImage(f)) return;
+
+        Integer pages = pageCounts.get(f);
+        var current = ranges.get(f);
+        var dialog = new TextInputDialog(current == null ? "" : current.from() + "-" + current.to());
+        dialog.setTitle("Plage de pages");
+        dialog.setHeaderText(fileImportService.getDisplayName(f)
+            + (pages != null && pages > 0 ? " (" + pages + " pages)" : ""));
+        dialog.setContentText("Pages à imprimer (ex : 3-10, ou 5) :");
+        dialog.initOwner(app.stage());
+        app.styleDialog(dialog);
+        var input = dialog.showAndWait();
+        if (input.isEmpty()) return;
+
+        String text = input.get().trim();
+        if (text.isEmpty()) {
+            ranges.remove(f);
+            rebuildTree();
+            return;
+        }
+        var parsed = parseRange(text, pages);
+        if (parsed == null) {
+            warning("Plage invalide", "Format attendu : « 3-10 » ou « 5 », dans les limites du document.");
+            return;
+        }
+        ranges.put(f, parsed);
+        resumePoints.remove(f);
+        rebuildTree();
+    }
+
+    private static PrintService.PageRange parseRange(String text, Integer pages) {
+        try {
+            int from;
+            int to;
+            int dash = text.indexOf('-');
+            if (dash < 0) {
+                from = to = Integer.parseInt(text.trim());
+            } else {
+                from = Integer.parseInt(text.substring(0, dash).trim());
+                to = Integer.parseInt(text.substring(dash + 1).trim());
+            }
+            if (from < 1 || to < from) return null;
+            if (pages != null && pages > 0 && from > pages) return null;
+            return new PrintService.PageRange(from, to);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    /* ---------- Résumé ---------- */
+
+    private int effectivePages(File f) {
+        Integer pages = pageCounts.get(f);
+        if (pages == null || pages <= 0) return -1;
+        var range = ranges.get(f);
+        if (range == null) return pages;
+        int from = Math.min(range.from(), pages);
+        int to = Math.min(range.to(), pages);
+        return to - from + 1;
+    }
+
+    private List<PrintUnit> buildPrintUnits() {
+        boolean group = groupImagesCheck.isSelected();
+        List<PrintUnit> units = new ArrayList<>();
+        List<File> images = new ArrayList<>();
+        int imageUnitIndex = -1;
+        for (File f : allFiles) {
+            if (group && FileImportService.isImage(f)) {
+                if (imageUnitIndex < 0) {
+                    imageUnitIndex = units.size();
+                    units.add(null);
+                }
+                images.add(f);
+            } else {
+                units.add(PrintUnit.single(f));
+            }
+        }
+        if (imageUnitIndex >= 0) {
+            units.set(imageUnitIndex, images.size() == 1
+                ? PrintUnit.single(images.get(0))
+                : PrintUnit.imageGroup(images));
+        }
+        return units;
+    }
+
+    private int unitPages(PrintUnit unit) {
+        int total = 0;
+        for (File f : unit.allFiles()) {
+            int p = effectivePages(f);
+            if (p < 0) return -1;
+            total += p;
+        }
+        return total;
+    }
+
+    private void updateSummary() {
+        if (allFiles.isEmpty()) {
+            summaryLabel.setText("");
+            return;
+        }
+        int nup = Integer.parseInt(pagesPerSheetCombo.getSelectionModel().getSelectedItem());
+        boolean duplex = duplexSelected();
+        int copies = copiesSpinner.getValue();
+
+        long pages = 0;
+        long sheets = 0;
+        boolean unknown = false;
+        for (PrintUnit unit : buildPrintUnits()) {
+            int p = unitPages(unit);
+            if (p < 0) {
+                unknown = true;
+                continue;
+            }
+            pages += p;
+            long sides = (p + nup - 1) / nup;
+            sheets += duplex ? (sides + 1) / 2 : sides;
+        }
+        var sb = new StringBuilder();
+        sb.append(allFiles.size()).append(allFiles.size() > 1 ? " fichiers" : " fichier");
+        sb.append(" — ").append(unknown ? "≥ " : "").append(pages).append(pages > 1 ? " pages" : " page");
+        sb.append(", ~").append(sheets * copies).append(sheets * copies > 1 ? " feuilles" : " feuille");
+        if (copies > 1) {
+            sb.append(" (").append(copies).append(" copies)");
+        }
+        summaryLabel.setText(sb.toString());
     }
 
     /* ---------- Print pipeline ---------- */
@@ -385,6 +702,19 @@ public class MainWindow extends VBox {
         );
     }
 
+    /** Nombre total de lots attendus (pour l'estimation de temps) ; -1 par unité inconnue ignorée. */
+    private int estimateTotalBatches(List<PrintUnit> units, PrintSettings settings) {
+        boolean duplex = settings.duplex() != PrintSettings.DuplexMode.RECTO;
+        int total = 0;
+        for (PrintUnit unit : units) {
+            int p = unitPages(unit);
+            if (p < 0) continue;
+            int sides = (p + settings.pagesPerSheet() - 1) / settings.pagesPerSheet();
+            total += BatchPlanner.plan(0, sides, settings.batchSize(), duplex).size() * settings.copies();
+        }
+        return total;
+    }
+
     private void startPrinting() {
         if (allFiles.isEmpty()) {
             warning("Attention", "Aucun fichier sélectionné.");
@@ -397,9 +727,9 @@ public class MainWindow extends VBox {
             return;
         }
         PrintSettings settings = buildPrintSettings();
-
-        final List<File> files = new ArrayList<>(allFiles);
-        final int total = files.size();
+        final List<PrintUnit> units = buildPrintUnits();
+        final int total = units.size();
+        final int totalBatchesEstimate = estimateTotalBatches(units, settings);
 
         setControlsEnabled(false);
         cancelButton.setDisable(false);
@@ -407,58 +737,80 @@ public class MainWindow extends VBox {
         progressBar.setProgress(0);
         progressLabel.setText("0 / " + total);
 
-        LogService.info("Lancement impression : " + total + " fichier(s), imprimante=" + printer.getName());
+        LogService.info("Lancement impression : " + total + " unité(s), imprimante=" + printer.getName());
 
         List<File> failedFiles = new ArrayList<>();
+        long startNanos = System.nanoTime();
+        int[] batchesDone = {0};
         var task = new Task<Void>() {
             @Override
             protected Void call() {
                 PrintService service = new PrintService();
                 for (int i = 0; i < total; i++) {
                     if (isCancelled() || Thread.currentThread().isInterrupted()) return null;
-                    final int fileIndex = i;
-                    File file = files.get(i);
-                    int startPage = resumePages.getOrDefault(file, 0);
-                    try {
-                        service.print(file, printer, settings, startPage, progress -> {
-                            String msg = String.format("[%s] Lot %d/%d (pages %d à %d) envoyé",
-                                progress.fileName(), progress.batchNumber(), progress.totalBatches(),
-                                progress.fromPage(), progress.toPage());
-                            Platform.runLater(() -> appendLog(msg));
-                            LogService.info(msg);
-                            float fileFrac = progress.totalBatches() > 0
-                                ? (float) progress.batchNumber() / progress.totalBatches() : 0f;
-                            float overall = (fileIndex + fileFrac) / total;
-                            Platform.runLater(() -> progressBar.setProgress(overall));
+                    final int unitIndex = i;
+                    PrintUnit unit = units.get(i);
+                    File resumeKey = unit.resumeKey();
+                    PrintService.ResumePoint resume =
+                        resumePoints.getOrDefault(resumeKey, PrintService.ResumePoint.START);
+                    java.util.function.Consumer<PrintService.PrintProgress> onProgress = progress -> {
+                        String copyPart = progress.totalCopies() > 1
+                            ? "Copie " + progress.copy() + "/" + progress.totalCopies() + " — " : "";
+                        String msg = String.format("[%s] %sLot %d/%d (pages %d à %d) envoyé",
+                            progress.fileName(), copyPart, progress.batchNumber(), progress.totalBatches(),
+                            progress.fromPage(), progress.toPage());
+                        LogService.info(msg);
+                        batchesDone[0]++;
+                        String eta = formatEta(startNanos, batchesDone[0], totalBatchesEstimate);
+                        float copyFrac = ((progress.copy() - 1) * (float) progress.totalBatches()
+                            + progress.batchNumber()) / (progress.totalCopies() * (float) progress.totalBatches());
+                        float overall = (unitIndex + copyFrac) / total;
+                        Platform.runLater(() -> {
+                            appendLog(msg);
+                            progressBar.setProgress(overall);
+                            progressLabel.setText(unitIndex + " / " + total + eta);
                         });
-                        resumePages.remove(file);
+                    };
+                    try {
+                        if (unit.file() != null) {
+                            service.print(unit.file(), printer, settings, ranges.get(unit.file()),
+                                resume, passwords.get(unit.file()), onProgress);
+                        } else {
+                            service.printImageGroup(unit.images(), unit.label(), printer, settings,
+                                resume, onProgress);
+                        }
+                        resumePoints.remove(resumeKey);
                         int current = i + 1;
                         Platform.runLater(() -> {
                             progressBar.setProgress((double) current / total);
-                            progressLabel.setText(current + " / " + total);
+                            progressLabel.setText(current + " / " + total
+                                + formatEta(startNanos, batchesDone[0], totalBatchesEstimate));
                         });
                     } catch (PrintService.PartialPrintException ex) {
                         if (isCancelled() || Thread.currentThread().isInterrupted()) return null;
-                        int resume = ex.getResumePage();
-                        resumePages.put(file, resume);
+                        PrintService.ResumePoint point = ex.getResumePoint();
+                        resumePoints.put(resumeKey, point);
                         String raw = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
-                        String friendly = "Le spooler a interrompu l'envoi après plusieurs tentatives — reprise prévue à la page " + (resume + 1);
-                        Platform.runLater(() -> appendLog("ERREUR [" + file.getName() + "] : " + friendly));
-                        LogService.error("Impression partielle pour " + file.getName() + " — reprise page " + (resume + 1) + " — " + raw, ex);
-                        failedFiles.add(file);
+                        String friendly = "Le spooler a interrompu l'envoi après plusieurs tentatives — reprise prévue à la page "
+                            + (point.page() + 1)
+                            + (settings.copies() > 1 ? " (copie " + point.copy() + ")" : "");
+                        Platform.runLater(() -> appendLog("ERREUR [" + unit.label() + "] : " + friendly));
+                        LogService.error("Impression partielle pour " + unit.label()
+                            + " — reprise page " + (point.page() + 1) + " — " + raw, ex);
+                        failedFiles.addAll(unit.allFiles());
                     } catch (java.awt.print.PrinterException ex) {
                         if (isCancelled() || Thread.currentThread().isInterrupted()) return null;
                         String raw = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
                         String friendly = "Le spooler a interrompu l'envoi après plusieurs tentatives (imprimante occupée ou hors ligne)";
-                        Platform.runLater(() -> appendLog("ERREUR [" + file.getName() + "] : " + friendly));
-                        LogService.error("Impression échouée pour " + file.getName() + " — " + raw, ex);
-                        failedFiles.add(file);
+                        Platform.runLater(() -> appendLog("ERREUR [" + unit.label() + "] : " + friendly));
+                        LogService.error("Impression échouée pour " + unit.label() + " — " + raw, ex);
+                        failedFiles.addAll(unit.allFiles());
                     } catch (Exception ex) {
                         if (isCancelled() || Thread.currentThread().isInterrupted()) return null;
                         String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getName();
-                        Platform.runLater(() -> appendLog("ERREUR [" + file.getName() + "] : " + msg));
-                        LogService.error("Impression échouée pour " + file.getName(), ex);
-                        failedFiles.add(file);
+                        Platform.runLater(() -> appendLog("ERREUR [" + unit.label() + "] : " + msg));
+                        LogService.error("Impression échouée pour " + unit.label(), ex);
+                        failedFiles.addAll(unit.allFiles());
                     }
                 }
                 return null;
@@ -506,6 +858,19 @@ public class MainWindow extends VBox {
         t.start();
     }
 
+    private static String formatEta(long startNanos, int batchesDone, int totalBatches) {
+        if (batchesDone < 2 || totalBatches <= 0 || batchesDone >= totalBatches) {
+            return "";
+        }
+        long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
+        long remainingMs = elapsedMs / batchesDone * (totalBatches - batchesDone);
+        long seconds = (remainingMs + 999) / 1000;
+        if (seconds < 90) {
+            return " — ~" + seconds + "s";
+        }
+        return " — ~" + ((seconds + 59) / 60) + " min";
+    }
+
     private void cancelPrinting() {
         if (currentTask == null || !currentTask.isRunning()) return;
         cancelButton.setDisable(true);
@@ -524,6 +889,8 @@ public class MainWindow extends VBox {
         printButton.setDisable(!enabled);
         addButton.setDisable(!enabled);
         removeButton.setDisable(!enabled);
+        moveUpButton.setDisable(!enabled);
+        moveDownButton.setDisable(!enabled);
         printerCombo.setDisable(!enabled);
         batchSizeSpinner.setDisable(!enabled);
         copiesSpinner.setDisable(!enabled);
@@ -531,6 +898,7 @@ public class MainWindow extends VBox {
         pagesPerSheetCombo.setDisable(!enabled);
         orientationCombo.setDisable(!enabled);
         colorCombo.setDisable(!enabled);
+        groupImagesCheck.setDisable(!enabled);
     }
 
     private void warning(String header, String content) {
